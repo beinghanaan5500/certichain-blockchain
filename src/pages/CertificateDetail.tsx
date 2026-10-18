@@ -18,13 +18,15 @@ import {
   parseContractError,
 } from '../utils/contract';
 import { Certificate } from '../types';
+import { getDemoCertificate } from '../utils/demoData';
 
 export default function CertificateDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { wallet, contract, connectWallet, refreshContract } = useApp();
+  const { wallet, contract, connectWallet, refreshContract, isDemoMode, revokeDemoCert } = useApp();
 
   const [cert, setCert] = useState<Certificate | null>(null);
+  const [isDemoCert, setIsDemoCert] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -55,19 +57,51 @@ export default function CertificateDetail() {
     setLoading(true);
     setErrorMsg('');
 
+    // Check demo records first if in demo mode
+    if (isDemoMode) {
+      const demo = getDemoCertificate(id);
+      if (demo) {
+        setCert(demo);
+        setIsDemoCert(true);
+        setNotFound(false);
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
       const c = await getContract();
       if (!c) {
+        // Fallback to demo if contract not reachable
+        const demo = getDemoCertificate(id);
+        if (demo) {
+          setCert(demo);
+          setIsDemoCert(true);
+          setNotFound(false);
+          setLoading(false);
+          return;
+        }
         setErrorMsg('Unable to connect to blockchain RPC.');
         setLoading(false);
         return;
       }
+
       const exists = await c.certificateExists_check(id);
       if (!exists) {
+        // Check demo records as secondary fallback
+        const demo = getDemoCertificate(id);
+        if (demo) {
+          setCert(demo);
+          setIsDemoCert(true);
+          setNotFound(false);
+          setLoading(false);
+          return;
+        }
         setNotFound(true);
         setLoading(false);
         return;
       }
+
       const raw = await c.getCertificate(id);
       setCert({
         certificateId:   raw.certificateId,
@@ -82,14 +116,22 @@ export default function CertificateDetail() {
         isRevoked:       raw.isRevoked,
         revokeReason:    raw.revokeReason,
       });
+      setIsDemoCert(false);
       setNotFound(false);
     } catch (err: any) {
       console.error('Failed to load certificate:', err);
-      setErrorMsg(parseContractError(err));
+      const demo = getDemoCertificate(id);
+      if (demo) {
+        setCert(demo);
+        setIsDemoCert(true);
+        setNotFound(false);
+      } else {
+        setErrorMsg(parseContractError(err));
+      }
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, isDemoMode]);
 
   useEffect(() => {
     loadCert();
@@ -99,6 +141,21 @@ export default function CertificateDetail() {
     if (!revokeReason.trim() || !cert) return;
     setRevoking(true);
     setRevokeError('');
+
+    // If demo record, handle via demoData
+    if (isDemoCert || isDemoMode) {
+      const ok = revokeDemoCert(cert.certificateId, revokeReason.trim());
+      setRevoking(false);
+      if (ok) {
+        setRevokeSuccess(true);
+        setShowRevokeConfirm(false);
+        await loadCert();
+      } else {
+        setRevokeError('Failed to revoke demo certificate.');
+      }
+      return;
+    }
+
     try {
       const c = await getContract(true);
       if (!c) throw new Error('Contract unavailable. Ensure wallet is connected.');
@@ -366,9 +423,42 @@ export default function CertificateDetail() {
 
       {/* Document Cryptographic Verification Component */}
       <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
-        <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>
-          Document Cryptographic Hash Verification
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+          <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Document Cryptographic Hash Verification
+          </div>
+          {/* Quick simulation buttons for presentation */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                const mockFile = new File(['mock content'], `${cert.studentName.replace(/\s+/g, '_')}_Official_Degree.pdf`, { type: 'application/pdf' });
+                setFile(mockFile);
+                setFileHash(cert.documentHash);
+                setHashResult('match');
+              }}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '4px 10px', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+            >
+              ✓ Simulate Matching Original File
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const mockFile = new File(['tampered content'], `${cert.studentName.replace(/\s+/g, '_')}_Tampered_Copy.pdf`, { type: 'application/pdf' });
+                setFile(mockFile);
+                const alteredHash = '0xdeadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678';
+                setFileHash(alteredHash);
+                setHashResult('mismatch');
+              }}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '4px 10px', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+            >
+              ⚠ Simulate Altered / Tampered File
+            </button>
+          </div>
         </div>
+
         <p style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.5, marginBottom: 16 }}>
           Verify whether an offline file copy matches this on-chain record by computing its SHA-256 fingerprint:
         </p>
@@ -401,7 +491,7 @@ export default function CertificateDetail() {
           ) : file ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <FileCheck size={18} color="#34d399" />
+                <FileCheck size={18} color={hashResult === 'match' ? '#34d399' : '#f87171'} />
                 <span style={{ fontSize: '13px', color: '#f1f5f9' }}>{file.name}</span>
               </div>
               <span style={{ fontSize: '11px', color: '#64748b' }}>Click to re-select</span>
@@ -460,10 +550,26 @@ export default function CertificateDetail() {
       {!cert.isRevoked && (
         <div className="glass-card" style={{ padding: 24, border: '1px solid rgba(239, 68, 68, 0.2)' }}>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#f87171', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>
-            Administrative Certificate Revocation
+            {isDemoCert || isDemoMode ? 'Demo Certificate Revocation (Simulation)' : 'Administrative Certificate Revocation'}
           </div>
 
-          {!wallet.isConnected ? (
+          {(isDemoCert || isDemoMode) ? (
+            !showRevokeConfirm ? (
+              <div>
+                <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: 14 }}>
+                  In Demo Mode, you can simulate revoking this credential with a reason to demonstrate institutional disciplinary actions. The revocation persists across page refreshes.
+                </p>
+                <button
+                  type="button"
+                  className="btn-danger"
+                  onClick={() => setShowRevokeConfirm(true)}
+                  style={{ fontSize: '13px' }}
+                >
+                  Initiate Demo Revocation
+                </button>
+              </div>
+            ) : null
+          ) : !wallet.isConnected ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
               <span style={{ fontSize: '13px', color: '#94a3b8' }}>
                 Only the contract owner or authorized academic issuers can revoke certificates.
@@ -490,10 +596,12 @@ export default function CertificateDetail() {
                 Initiate Certificate Revocation
               </button>
             </div>
-          ) : (
+          ) : null}
+
+          {showRevokeConfirm && (
             <div style={{ background: 'rgba(239, 68, 68, 0.05)', padding: 18, borderRadius: 10 }}>
               <div style={{ fontWeight: 600, color: '#f87171', fontSize: '14px', marginBottom: 10 }}>
-                Confirm Revocation for {cert.certificateId}
+                Confirm Revocation for {cert.certificateId} {(isDemoCert || isDemoMode) && '(Demo Record)'}
               </div>
               <label className="form-label" htmlFor="revokeReason">
                 Reason for Revocation <span style={{ color: '#f87171' }}>*</span>
@@ -522,16 +630,7 @@ export default function CertificateDetail() {
                   disabled={revoking || !revokeReason.trim()}
                   style={{ fontSize: '13px' }}
                 >
-                  {revoking ? 'Confirming Revocation on Blockchain...' : 'Confirm & Broadcast Revocation'}
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => setShowRevokeConfirm(false)}
-                  disabled={revoking}
-                  style={{ fontSize: '13px' }}
-                >
-                  Cancel
+                  {revoking ? 'Confirming Revocation...' : (isDemoCert || isDemoMode) ? 'Revoke Demo Certificate' : 'Confirm & Broadcast Revocation'}
                 </button>
               </div>
             </div>

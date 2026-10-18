@@ -13,12 +13,38 @@ import {
 } from '../utils/contract';
 import { ethers } from 'ethers';
 
+import {
+  DemoCertificate,
+  getDemoCertificates,
+  getSavedDemoModePreference,
+  setSavedDemoModePreference,
+  registerDemoCertificate,
+  revokeDemoCertificate,
+  resetDemoCertificates,
+} from '../utils/demoData';
+
 interface AppContextType {
   wallet: WalletState;
   contract: ContractState;
   walletError: WalletError | null;
   isWalletModalOpen: boolean;
   isLoading: boolean;
+  isDemoMode: boolean;
+  demoCertificates: DemoCertificate[];
+  toggleDemoMode: (active?: boolean) => void;
+  refreshDemoData: () => void;
+  addDemoCertificate: (data: {
+    certificateId: string;
+    studentName: string;
+    courseName: string;
+    institutionName: string;
+    grade: string;
+    issueDate: bigint | number;
+    documentHash: string;
+    issuedBy?: string;
+  }) => DemoCertificate;
+  revokeDemoCert: (id: string, reason: string) => boolean;
+  resetDemoData: () => void;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
   switchNetwork: (targetChainId?: number) => Promise<boolean>;
@@ -49,9 +75,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ownerAddress: null,
   });
 
+  // Demo Mode state: default to true if user hasn't explicitly disabled it
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(() => {
+    const saved = getSavedDemoModePreference();
+    return saved !== null ? saved : true;
+  });
+
+  const [demoCertificates, setDemoCertificates] = useState<DemoCertificate[]>(() => getDemoCertificates());
+
   const [walletError, setWalletError] = useState<WalletError | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  const refreshDemoData = useCallback(() => {
+    setDemoCertificates(getDemoCertificates());
+  }, []);
+
+  const toggleDemoMode = useCallback((active?: boolean) => {
+    setIsDemoMode(prev => {
+      const next = active !== undefined ? active : !prev;
+      setSavedDemoModePreference(next);
+      return next;
+    });
+  }, []);
+
+  const addDemoCertificate = useCallback(
+    (data: {
+      certificateId: string;
+      studentName: string;
+      courseName: string;
+      institutionName: string;
+      grade: string;
+      issueDate: bigint | number;
+      documentHash: string;
+      issuedBy?: string;
+    }) => {
+      const created = registerDemoCertificate(data);
+      refreshDemoData();
+      return created;
+    },
+    [refreshDemoData]
+  );
+
+  const revokeDemoCert = useCallback(
+    (id: string, reason: string) => {
+      const success = revokeDemoCertificate(id, reason);
+      if (success) {
+        refreshDemoData();
+      }
+      return success;
+    },
+    [refreshDemoData]
+  );
+
+  const resetDemoData = useCallback(() => {
+    resetDemoCertificates();
+    refreshDemoData();
+  }, [refreshDemoData]);
 
   const clearWalletError = useCallback(() => setWalletError(null), []);
   const openWalletModal = useCallback(() => setIsWalletModalOpen(true), []);
@@ -314,6 +394,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         walletError,
         isWalletModalOpen,
         isLoading,
+        isDemoMode,
+        demoCertificates,
+        toggleDemoMode,
+        refreshDemoData,
+        addDemoCertificate,
+        revokeDemoCert,
+        resetDemoData,
         connectWallet,
         disconnectWallet,
         switchNetwork,

@@ -27,7 +27,8 @@ CertiChain supports two operational modes:
   - `https://rpc.sepolia.org` (❌ **TIMEOUT**: Public endpoint unresponsive)
 - **Block Explorer:** [https://sepolia.etherscan.io](https://sepolia.etherscan.io)
 - **Security & Phishing Audit:** Resolved. Production HTTPS auto-defaults to Sepolia, preventing MetaMask localhost warnings and mixed content. Strict Content-Security-Policy header active on Vercel.
-- **Status:** Deployment automation prepared via `scripts/deploy-sepolia.cjs`. Frontend build and tests clean (27/27 contract, 18/18 frontend). Live bundle on Vercel: `index-BP13w7Aj.js`.
+- **Status:** Deployment automation prepared via `scripts/deploy-sepolia.cjs`. Frontend build and tests clean (27/27 contract, 22/22 frontend = 49/49 total passing).
+- **Presentation DEMO MODE:** Active by default on Vercel production. Features 5 realistic academic credentials covering all presentation scenarios (Valid #1, Valid #2, Revoked, Tamper/Hash Mismatch, and Unknown/404). Allows full presentation without running local node. Live bundle on Vercel: updated with Demo Mode engine.
 
 ---
 

@@ -25,6 +25,10 @@ export default function Sidebar() {
     switchNetwork,
     openWalletModal,
     isLoading,
+    isDemoMode,
+    demoCertificates,
+    toggleDemoMode,
+    resetDemoData,
   } = useApp();
 
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -162,6 +166,76 @@ export default function Sidebar() {
           gap: '10px',
         }}
       >
+        {/* Demo Mode Toggle Card */}
+        <div
+          style={{
+            padding: '10px 12px',
+            borderRadius: '10px',
+            background: isDemoMode ? 'rgba(59, 130, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+            border: `1px solid ${isDemoMode ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div
+                style={{
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  background: isDemoMode ? '#3b82f6' : '#64748b',
+                  boxShadow: isDemoMode ? '0 0 8px rgba(59, 130, 246, 0.6)' : 'none',
+                }}
+              />
+              <span style={{ fontSize: '11px', fontWeight: 700, color: isDemoMode ? '#60a5fa' : '#94a3b8', letterSpacing: '0.02em' }}>
+                DEMO MODE
+              </span>
+            </div>
+            <button
+              onClick={() => toggleDemoMode()}
+              style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                padding: '3px 8px',
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                background: isDemoMode ? '#3b82f6' : 'rgba(255, 255, 255, 0.08)',
+                color: isDemoMode ? '#ffffff' : '#94a3b8',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {isDemoMode ? 'ACTIVE' : 'OFF'}
+            </button>
+          </div>
+          <div style={{ fontSize: '10px', color: '#64748b', lineHeight: 1.4 }}>
+            {isDemoMode
+              ? `Presentation Mode: ${demoCertificates.length} sample certificates active (no local node needed)`
+              : 'Live Mode: Querying smart contract directly'}
+          </div>
+          {isDemoMode && (
+            <div style={{ marginTop: '6px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resetDemoData();
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  fontSize: '9px',
+                  cursor: 'pointer',
+                  padding: 0,
+                  textDecoration: 'underline',
+                }}
+                title="Reset sample records back to initial state"
+              >
+                Reset Demo Data
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Network / Contract Status Card */}
         <div
           style={{
@@ -192,7 +266,7 @@ export default function Sidebar() {
           </div>
           <div style={{ fontSize: '10px', color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
             <span>Contract: {formatAddress(contract.address || '')}</span>
-            <span>{contract.totalCertificates} certs</span>
+            <span>{isDemoMode ? `${demoCertificates.length} (demo)` : `${contract.totalCertificates} certs`}</span>
           </div>
         </div>
 

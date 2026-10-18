@@ -19,7 +19,18 @@ import {
 import { Certificate } from '../types';
 
 export default function Dashboard() {
-  const { wallet, contract, connectWallet, switchNetwork, refreshContract } = useApp();
+  const {
+    wallet,
+    contract,
+    connectWallet,
+    switchNetwork,
+    refreshContract,
+    isDemoMode,
+    demoCertificates,
+    toggleDemoMode,
+    resetDemoData,
+  } = useApp();
+
   const [recentCerts, setRecentCerts] = useState<Certificate[]>([]);
   const [activeCount, setActiveCount] = useState<number>(0);
   const [revokedCount, setRevokedCount] = useState<number>(0);
@@ -32,6 +43,17 @@ export default function Dashboard() {
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
     setErrorMsg('');
+
+    if (isDemoMode) {
+      // Load from local demo data store
+      const active = demoCertificates.filter(c => !c.isRevoked).length;
+      const revoked = demoCertificates.filter(c => c.isRevoked).length;
+      setActiveCount(active);
+      setRevokedCount(revoked);
+      setRecentCerts(demoCertificates.slice(0, 5));
+      setLoading(false);
+      return;
+    }
 
     try {
       const c = await getContract();
@@ -91,45 +113,49 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [targetName]);
+  }, [isDemoMode, demoCertificates, targetName]);
 
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
 
   const handleRefresh = async () => {
-    await refreshContract();
+    if (!isDemoMode) {
+      await refreshContract();
+    }
     await loadDashboardData();
   };
 
+  const totalCount = isDemoMode ? demoCertificates.length : contract.totalCertificates;
+
   const statCards = [
     {
-      label: 'Total Registered',
-      value: contract.totalCertificates,
+      label: isDemoMode ? 'Demo Registered' : 'Total Registered',
+      value: totalCount,
       icon: Award,
       color: '#3b82f6',
-      sub: 'On-chain certificates',
+      sub: isDemoMode ? 'Fictional demo records' : 'On-chain certificates',
     },
     {
       label: 'Active & Valid',
       value: activeCount,
       icon: ShieldCheck,
       color: '#10b981',
-      sub: 'Tamper-proof credentials',
+      sub: isDemoMode ? 'Verified demo credentials' : 'Tamper-proof credentials',
     },
     {
-      label: 'Revoked Certificates',
+      label: 'Revoked Records',
       value: revokedCount,
       icon: AlertTriangle,
       color: '#f87171',
-      sub: 'Flagged by institutions',
+      sub: isDemoMode ? 'Flagged sample certificates' : 'Flagged by institutions',
     },
     {
-      label: 'Block Height',
-      value: contract.lastBlockNumber ? `#${contract.lastBlockNumber}` : '—',
+      label: 'Ledger Mode',
+      value: isDemoMode ? 'DEMO SIM' : (contract.lastBlockNumber ? `#${contract.lastBlockNumber}` : '—'),
       icon: Activity,
       color: '#f59e0b',
-      sub: targetName.replace(/\(.*\)/, ''),
+      sub: isDemoMode ? 'Presentation Mode' : targetName.replace(/\(.*\)/, ''),
     },
   ];
 
@@ -148,15 +174,32 @@ export default function Dashboard() {
         }}
       >
         <div>
-          <h1 className="page-title gradient-text">CertiChain Overview</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 className="page-title gradient-text">CertiChain Overview</h1>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                padding: '3px 8px',
+                borderRadius: '6px',
+                background: isDemoMode ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                color: isDemoMode ? '#60a5fa' : '#34d399',
+                border: `1px solid ${isDemoMode ? 'rgba(59, 130, 246, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+              }}
+            >
+              {isDemoMode ? 'DEMO MODE ACTIVE' : 'LIVE BLOCKCHAIN'}
+            </span>
+          </div>
           <p className="page-subtitle">
-            Decentralized student credential registry on Ethereum. Live state verified from smart contract.
+            {isDemoMode
+              ? 'Presentation Mode active with 5 realistic sample academic credentials. Fictional demo records for college presentation.'
+              : 'Decentralized student credential registry on Ethereum. Live state verified from smart contract.'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <Link to="/register" className="btn-primary" style={{ fontSize: '13px' }}>
             <FilePlus size={14} />
-            Register Certificate
+            {isDemoMode ? 'Add Demo Cert' : 'Register Certificate'}
           </Link>
           <button
             className="btn-secondary"
@@ -170,14 +213,156 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Network Alert / Diagnostic Banner */}
-      {!contract.isDeployed ? (
+      {/* Demo Mode Presentation Banner with Quick-Test Chips */}
+      {isDemoMode ? (
+        <div
+          className="glass-card"
+          style={{
+            padding: '20px 24px',
+            marginBottom: 24,
+            borderRadius: '12px',
+            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(6, 182, 212, 0.08) 100%)',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc' }}>
+                  🎓 College Presentation Demo Mode
+                </span>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    background: 'rgba(59, 130, 246, 0.25)',
+                    color: '#93c5fd',
+                  }}
+                >
+                  NO LAPTOP LOCAL NODE REQUIRED
+                </span>
+              </div>
+              <p style={{ fontSize: '13px', color: '#94a3b8', margin: 0, maxWidth: 760, lineHeight: 1.5 }}>
+                Realistic demonstration data with fictional student identities is active. All records survive page refresh and work directly on this deployed website. Click any sample ID below to immediately verify:
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => toggleDemoMode(false)}
+                className="btn-secondary"
+                style={{ fontSize: '11px', padding: '6px 12px' }}
+                title="Switch to live smart contract queries"
+              >
+                Switch to On-Chain
+              </button>
+              <button
+                onClick={resetDemoData}
+                className="btn-secondary"
+                style={{ fontSize: '11px', padding: '6px 12px' }}
+                title="Reset sample records back to initial 5 demo certificates"
+              >
+                Reset Demo Data
+              </button>
+            </div>
+          </div>
+
+          {/* Quick-Test Presentation Chips */}
+          <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Quick Verification Tests:</span>
+            <Link
+              to="/verify?id=DEMO-CERT-2024-001"
+              style={{
+                fontSize: '11px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: '#34d399',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                textDecoration: 'none',
+                fontWeight: 600,
+              }}
+            >
+              ✓ DEMO-CERT-2024-001 (Valid: Aarav Sharma)
+            </Link>
+            <Link
+              to="/verify?id=DEMO-CERT-2024-002"
+              style={{
+                fontSize: '11px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: '#34d399',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                textDecoration: 'none',
+                fontWeight: 600,
+              }}
+            >
+              ✓ DEMO-CERT-2024-002 (Valid: Diya Nair)
+            </Link>
+            <Link
+              to="/verify?id=DEMO-CERT-2023-REVOKED"
+              style={{
+                fontSize: '11px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                background: 'rgba(239, 68, 68, 0.15)',
+                color: '#f87171',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                textDecoration: 'none',
+                fontWeight: 600,
+              }}
+            >
+              ⚠ DEMO-CERT-2023-REVOKED (Revoked: Rohan Verma)
+            </Link>
+            <Link
+              to="/verify?id=DEMO-CERT-2024-TAMPER-TEST"
+              style={{
+                fontSize: '11px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                background: 'rgba(245, 158, 11, 0.15)',
+                color: '#fbbf24',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                textDecoration: 'none',
+                fontWeight: 600,
+              }}
+            >
+              🔍 DEMO-CERT-2024-TAMPER-TEST (Hash Check)
+            </Link>
+            <Link
+              to="/verify?id=DEMO-UNKNOWN-404"
+              style={{
+                fontSize: '11px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                background: 'rgba(148, 163, 184, 0.12)',
+                color: '#cbd5e1',
+                border: '1px solid rgba(148, 163, 184, 0.25)',
+                textDecoration: 'none',
+                fontWeight: 600,
+              }}
+            >
+              ✕ DEMO-UNKNOWN-404 (Not Found)
+            </Link>
+          </div>
+        </div>
+      ) : !contract.isDeployed ? (
         <div className="alert alert-warning" style={{ marginBottom: 24 }}>
           <AlertTriangle size={18} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, fontSize: '13px' }}>
-            <strong>Smart Contract Not Detected:</strong> No deployed CertiChain contract could be reached at the configured address.
-            If running locally, run <code>npm run deploy</code>. For public Sepolia testnet demonstration, execute <code>npm run deploy:sepolia</code>.
+            <strong>Smart Contract Not Reached on {targetName}:</strong> No contract bytecode is active on the public chain.
+            For your presentation, switch to <strong>Demo Mode</strong> to show realistic certificates without needing a running local node.
           </div>
+          <button
+            onClick={() => toggleDemoMode(true)}
+            className="btn-primary"
+            style={{ fontSize: '12px', padding: '6px 14px', flexShrink: 0 }}
+          >
+            Activate Demo Mode
+          </button>
         </div>
       ) : wallet.isConnected && !wallet.isCorrectNetwork ? (
         <div className="alert alert-warning" style={{ marginBottom: 24 }}>
@@ -344,22 +529,28 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* Recent On-Chain Activity Table */}
+      {/* Recent Activity Table */}
       <div className="glass-card" style={{ padding: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <div>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc' }}>Recent On-Chain Activity</div>
-            <div style={{ fontSize: '11px', color: '#64748b' }}>Latest certificates anchored to the ledger</div>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc' }}>
+              {isDemoMode ? 'Recent Activity (Demo Presentation Records)' : 'Recent On-Chain Activity'}
+            </div>
+            <div style={{ fontSize: '11px', color: '#64748b' }}>
+              {isDemoMode
+                ? 'Sample student credentials prepared for college project presentation'
+                : 'Latest certificates anchored to the blockchain ledger'}
+            </div>
           </div>
           <Link to="/records" style={{ fontSize: '12px', color: '#3b82f6', fontWeight: 600, textDecoration: 'none' }}>
-            View Full Ledger ({contract.totalCertificates}) →
+            View Full Ledger ({totalCount}) →
           </Link>
         </div>
 
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center' }}>
             <div className="spinner" style={{ margin: '0 auto 10px', width: 22, height: 22 }} />
-            <span style={{ fontSize: '12px', color: '#64748b' }}>Querying blockchain data...</span>
+            <span style={{ fontSize: '12px', color: '#64748b' }}>Querying credential data...</span>
           </div>
         ) : recentCerts.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center' }}>
@@ -368,11 +559,19 @@ export default function Dashboard() {
               No Certificates Registered Yet
             </div>
             <div style={{ fontSize: '12px', color: '#64748b', maxWidth: 400, margin: '0 auto 16px' }}>
-              The connected smart contract currently contains zero records. Be the first to issue an on-chain academic certificate.
+              {isDemoMode
+                ? 'No demo certificates found. Click Reset Demo Data to restore the default sample presentation records.'
+                : 'The connected smart contract currently contains zero records. Be the first to issue an on-chain academic certificate.'}
             </div>
-            <Link to="/register" className="btn-primary" style={{ fontSize: '12px' }}>
-              Issue First Certificate
-            </Link>
+            {isDemoMode ? (
+              <button onClick={resetDemoData} className="btn-primary" style={{ fontSize: '12px' }}>
+                Restore Default Demo Records
+              </button>
+            ) : (
+              <Link to="/register" className="btn-primary" style={{ fontSize: '12px' }}>
+                Issue First Certificate
+              </Link>
+            )}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -419,10 +618,25 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#94a3b8' }}>
                     {cert.certificateId}
                   </span>
+                  {isDemoMode && (
+                    <span
+                      style={{
+                        fontSize: '9px',
+                        fontWeight: 700,
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        background: 'rgba(59, 130, 246, 0.15)',
+                        color: '#60a5fa',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                      }}
+                    >
+                      DEMO
+                    </span>
+                  )}
                   <span className={`badge ${cert.isRevoked ? 'badge-danger' : 'badge-success'}`} style={{ fontSize: '9px' }}>
                     {cert.isRevoked ? 'Revoked' : 'Valid'}
                   </span>

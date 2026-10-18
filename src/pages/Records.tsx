@@ -18,7 +18,15 @@ import {
 import { Certificate } from '../types';
 
 export default function Records() {
-  const { contract, refreshContract } = useApp();
+  const {
+    contract,
+    refreshContract,
+    isDemoMode,
+    demoCertificates,
+    toggleDemoMode,
+    resetDemoData,
+  } = useApp();
+
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -33,6 +41,13 @@ export default function Records() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     setErrorMsg('');
+
+    if (isDemoMode) {
+      setCertificates(demoCertificates);
+      setLoading(false);
+      return;
+    }
+
     try {
       const c = await getContract();
       if (!c) {
@@ -75,7 +90,7 @@ export default function Records() {
     } finally {
       setLoading(false);
     }
-  }, [targetName]);
+  }, [isDemoMode, demoCertificates, targetName]);
 
   useEffect(() => {
     loadAll();
@@ -151,9 +166,26 @@ export default function Records() {
       {/* Page Header */}
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <h1 className="page-title gradient-text">Certificate Ledger</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 className="page-title gradient-text">Certificate Ledger</h1>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                padding: '3px 8px',
+                borderRadius: '6px',
+                background: isDemoMode ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                color: isDemoMode ? '#60a5fa' : '#34d399',
+                border: `1px solid ${isDemoMode ? 'rgba(59, 130, 246, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+              }}
+            >
+              {isDemoMode ? 'DEMO PRESENTATION RECORDS' : targetName}
+            </span>
+          </div>
           <p className="page-subtitle">
-            Cryptographically signed academic credentials registered on {targetName}.
+            {isDemoMode
+              ? 'Displaying 5 sample academic credentials prepared for college presentation. All records are fictional demo data.'
+              : `Cryptographically signed academic credentials registered on ${targetName}.`}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -169,7 +201,7 @@ export default function Records() {
           <button
             className="btn-secondary"
             onClick={async () => {
-              await refreshContract();
+              if (!isDemoMode) await refreshContract();
               await loadAll();
             }}
             disabled={loading}
@@ -180,6 +212,44 @@ export default function Records() {
           </button>
         </div>
       </div>
+
+      {/* Demo Mode Notice Banner */}
+      {isDemoMode && (
+        <div
+          style={{
+            padding: '12px 18px',
+            borderRadius: '10px',
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.25)',
+            marginBottom: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div style={{ fontSize: '12px', color: '#93c5fd' }}>
+            ℹ️ <strong>Presentation Simulation:</strong> You are viewing realistic fictional demo records. They persist across refreshes without requiring your laptop local node.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => toggleDemoMode(false)}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '4px 10px' }}
+            >
+              Switch to Live Blockchain
+            </button>
+            <button
+              onClick={resetDemoData}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '4px 10px' }}
+            >
+              Reset Sample Records
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error alert if any */}
       {errorMsg && (
@@ -317,6 +387,21 @@ export default function Records() {
                     <span style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc' }}>
                       {c.studentName}
                     </span>
+                    {isDemoMode && (
+                      <span
+                        style={{
+                          fontSize: '9px',
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: 'rgba(59, 130, 246, 0.15)',
+                          color: '#60a5fa',
+                          border: '1px solid rgba(59, 130, 246, 0.3)',
+                        }}
+                      >
+                        DEMO
+                      </span>
+                    )}
                     <span className={`badge ${c.isRevoked ? 'badge-danger' : 'badge-success'}`} style={{ fontSize: '10px' }}>
                       {c.isRevoked ? 'Revoked' : 'Valid'}
                     </span>

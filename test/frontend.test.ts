@@ -129,4 +129,71 @@ describe('CertiChain Frontend Utilities & Validation', () => {
       expect(parsed).toContain('already pending');
     });
   });
+
+  // ── Demo Mode Data & Utilities ─────────────────────────────────────────────
+  describe('Demo Mode Data & Persistence Helpers', () => {
+    // Import dynamically or test static structures
+    it('provides at least 5 realistic fictional demo certificates', async () => {
+      const { INITIAL_DEMO_CERTIFICATES, DEMO_PRESETS } = await import('../src/utils/demoData');
+      expect(INITIAL_DEMO_CERTIFICATES.length).toBeGreaterThanOrEqual(5);
+
+      // Verify required scenarios are covered
+      const validCerts = INITIAL_DEMO_CERTIFICATES.filter(c => !c.isRevoked);
+      const revokedCerts = INITIAL_DEMO_CERTIFICATES.filter(c => c.isRevoked);
+      expect(validCerts.length).toBeGreaterThanOrEqual(2);
+      expect(revokedCerts.length).toBeGreaterThanOrEqual(1);
+
+      // Verify presets have all 5 presentation cases
+      expect(DEMO_PRESETS.length).toBe(5);
+      const scenarios = DEMO_PRESETS.map(p => p.scenario);
+      expect(scenarios).toContain('valid-1');
+      expect(scenarios).toContain('valid-2');
+      expect(scenarios).toContain('revoked');
+      expect(scenarios).toContain('not-found');
+      expect(scenarios).toContain('hash-mismatch');
+    });
+
+    it('retrieves demo certificate by ID and returns null for unknown ID', async () => {
+      const { getDemoCertificate } = await import('../src/utils/demoData');
+      const cert1 = getDemoCertificate('DEMO-CERT-2024-001');
+      expect(cert1).toBeDefined();
+      expect(cert1?.studentName).toBe('Aarav Sharma');
+      expect(cert1?.isDemo).toBe(true);
+
+      const unknown = getDemoCertificate('UNKNOWN-NON-EXISTENT-999');
+      expect(unknown).toBeNull();
+    });
+
+    it('registers a new demo certificate and prevents duplicates', async () => {
+      const { registerDemoCertificate } = await import('../src/utils/demoData');
+      const newCert = {
+        certificateId: 'DEMO-NEW-TEST-001',
+        studentName: 'Test Student',
+        courseName: 'Test Course',
+        institutionName: 'Test University',
+        grade: '10.0 CGPA',
+        issueDate: 1715731200n,
+        documentHash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+        issuedBy: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+      };
+
+      const created = registerDemoCertificate(newCert);
+      expect(created.certificateId).toBe('DEMO-NEW-TEST-001');
+      expect(created.studentName).toBe('Test Student');
+
+      // Duplicate registration attempt must throw
+      expect(() => registerDemoCertificate(newCert)).toThrow('Duplicate ID');
+    });
+
+    it('revokes an existing demo certificate with reason', async () => {
+      const { revokeDemoCertificate, getDemoCertificate } = await import('../src/utils/demoData');
+      const res = revokeDemoCertificate('DEMO-CERT-2024-001', 'Administrative error during test');
+      expect(res).toBe(true);
+
+      const updated = getDemoCertificate('DEMO-CERT-2024-001');
+      expect(updated?.isRevoked).toBe(true);
+      expect(updated?.revokeReason).toBe('Administrative error during test');
+    });
+  });
 });
+

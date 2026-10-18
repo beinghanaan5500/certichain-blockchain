@@ -97,7 +97,18 @@ function InputField({
 }
 
 export default function RegisterCertificate() {
-  const { wallet, contract, connectWallet, switchNetwork, refreshContract } = useApp();
+  const {
+    wallet,
+    contract,
+    connectWallet,
+    switchNetwork,
+    refreshContract,
+    isDemoMode,
+    addDemoCertificate,
+    demoCertificates,
+    toggleDemoMode,
+  } = useApp();
+
   const [form, setForm] = useState<FormData>(INITIAL_FORM);
   const [errors, setErrors] = useState<Partial<FormData>>({});
   const [file, setFile] = useState<File | null>(null);
@@ -120,6 +131,22 @@ export default function RegisterCertificate() {
       setDuplicateChecked(null);
       return;
     }
+
+    if (isDemoMode) {
+      const exists = demoCertificates.some(c => c.certificateId.toLowerCase() === trimmed.toLowerCase());
+      setDuplicateChecked(exists);
+      if (exists) {
+        setErrors(prev => ({ ...prev, certificateId: 'This Certificate ID is already registered in demo records.' }));
+      } else {
+        setErrors(prev => {
+          const next = { ...prev };
+          delete next.certificateId;
+          return next;
+        });
+      }
+      return;
+    }
+
     try {
       const c = await getContract();
       if (!c) return;
@@ -137,7 +164,7 @@ export default function RegisterCertificate() {
     } catch {
       setDuplicateChecked(null);
     }
-  }, []);
+  }, [isDemoMode, demoCertificates]);
 
   const handleInputChange = (field: keyof FormData, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -223,6 +250,36 @@ export default function RegisterCertificate() {
 
     if (!validate()) return;
 
+    // In Demo Mode, issue without wallet
+    if (isDemoMode) {
+      setTx({ isLoading: true, hash: null, error: null, success: false });
+      setTxStage('confirming');
+
+      try {
+        const issueDateUnix = Math.floor(new Date(form.issueDate).getTime() / 1000);
+        addDemoCertificate({
+          certificateId:   form.certificateId.trim(),
+          studentName:     form.studentName.trim(),
+          courseName:      form.courseName.trim(),
+          institutionName: form.institutionName.trim(),
+          grade:           form.grade.trim(),
+          issueDate:       issueDateUnix,
+          documentHash:    fileHash,
+          issuedBy:        wallet.address || '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+        });
+
+        // Simulated demo transaction hash
+        const demoTxHash = '0x9f4a8b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a';
+        setTxStage('confirmed');
+        setTx({ isLoading: false, hash: demoTxHash, error: null, success: true });
+      } catch (err: any) {
+        console.error('Demo registration error:', err);
+        setTxStage('idle');
+        setTx({ isLoading: false, hash: null, error: err.message || 'Demo registration failed.', success: false });
+      }
+      return;
+    }
+
     if (!wallet.isConnected) {
       connectWallet();
       return;
@@ -295,7 +352,22 @@ export default function RegisterCertificate() {
       </div>
 
       {/* Network Alert / Wallet Requirements */}
-      {!wallet.isConnected ? (
+      {isDemoMode ? (
+        <div className="alert alert-info" style={{ marginBottom: 24, background: 'rgba(59, 130, 246, 0.08)', borderColor: 'rgba(59, 130, 246, 0.25)' }}>
+          <Info size={18} style={{ flexShrink: 0, marginTop: 2, color: '#60a5fa' }} />
+          <div style={{ flex: 1, fontSize: '13px', color: '#93c5fd' }}>
+            <strong>Demo Mode Active:</strong> You can issue simulated student credentials and compute local SHA-256 digests. Records are stored in demo storage without gas or wallet requirements and survive page refreshes.
+          </div>
+          <button
+            type="button"
+            onClick={() => toggleDemoMode(false)}
+            className="btn-secondary"
+            style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}
+          >
+            Switch to On-Chain
+          </button>
+        </div>
+      ) : !wallet.isConnected ? (
         <div className="alert alert-info" style={{ marginBottom: 24 }}>
           <Info size={18} style={{ flexShrink: 0, marginTop: 2 }} />
           <div style={{ flex: 1 }}>
@@ -736,13 +808,15 @@ export default function RegisterCertificate() {
                 ) : (
                   <>
                     <FilePlus size={16} />
-                    Register Certificate on Blockchain
+                    {isDemoMode ? 'Issue Certificate (Demo Mode)' : 'Register Certificate on Blockchain'}
                   </>
                 )}
               </button>
 
               <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'center', marginTop: 10 }}>
-                Transaction will be broadcast to {targetName} · Gas fees apply
+                {isDemoMode
+                  ? 'Demo record will be persisted locally · Presentation Simulation'
+                  : `Transaction will be broadcast to ${targetName} · Gas fees apply`}
               </div>
             </div>
           </div>

@@ -19,16 +19,18 @@ import {
   parseContractError,
 } from '../utils/contract';
 import { Certificate } from '../types';
+import { getDemoCertificate } from '../utils/demoData';
 
 type VerifyStatus = 'idle' | 'loading' | 'found' | 'not-found' | 'error';
 
 export default function VerifyCertificate() {
-  const { contract, refreshContract } = useApp();
+  const { contract, refreshContract, isDemoMode, toggleDemoMode } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [certId, setCertId] = useState(searchParams.get('id') || '');
   const [status, setStatus] = useState<VerifyStatus>('idle');
   const [cert, setCert] = useState<Certificate | null>(null);
+  const [isDemoResult, setIsDemoResult] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileHash, setFileHash] = useState('');
@@ -49,13 +51,45 @@ export default function VerifyCertificate() {
       setCert(null);
       setErrorMsg('');
       setHashResult(null);
+      setIsDemoResult(false);
 
+      // Check Demo Mode
+      if (isDemoMode) {
+        const demoCert = getDemoCertificate(trimmed);
+        if (!demoCert) {
+          setStatus('not-found');
+          return;
+        }
+
+        setCert(demoCert);
+        setIsDemoResult(true);
+        setStatus('found');
+
+        const hashToCompare = currentFileHash || fileHash;
+        if (hashToCompare) {
+          setHashResult(
+            hashToCompare.toLowerCase() === demoCert.documentHash.toLowerCase() ? 'match' : 'mismatch'
+          );
+        }
+        return;
+      }
+
+      // Live on-chain verification
       try {
         const c = await getContract();
         if (!c) {
+          // Check if it matches a demo cert for fallback
+          const demoCert = getDemoCertificate(trimmed);
+          if (demoCert) {
+            setCert(demoCert);
+            setIsDemoResult(true);
+            setStatus('found');
+            return;
+          }
+
           setStatus('error');
           setErrorMsg(
-            `Unable to establish RPC connection to ${targetName}. If running locally, ensure your node is active with 'npm run start'.`
+            `Unable to establish RPC connection to ${targetName}. If running locally, ensure node is active with 'npm run start'. Or toggle Demo Mode to test sample certificates.`
           );
           return;
         }
@@ -82,6 +116,7 @@ export default function VerifyCertificate() {
         };
 
         setCert(certificate);
+        setIsDemoResult(false);
         setStatus('found');
 
         const hashToCompare = currentFileHash || fileHash;
@@ -90,11 +125,19 @@ export default function VerifyCertificate() {
         }
       } catch (err: any) {
         console.error('Verification query failed:', err);
+        // If error querying network, check demo cert fallback
+        const demoCert = getDemoCertificate(trimmed);
+        if (demoCert) {
+          setCert(demoCert);
+          setIsDemoResult(true);
+          setStatus('found');
+          return;
+        }
         setStatus('error');
         setErrorMsg(parseContractError(err));
       }
     },
-    [fileHash, targetName]
+    [fileHash, isDemoMode, targetName]
   );
 
   // Check URL param on mount
@@ -229,10 +272,86 @@ export default function VerifyCertificate() {
           </div>
         </form>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, fontSize: '12px', color: '#64748b' }}>
-          <span>Target Network: <strong>{targetName}</strong></span>
-          <span>•</span>
-          <span>Permissionless: No wallet required to verify</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginTop: 14, fontSize: '12px', color: '#64748b' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span>Target Mode: <strong>{isDemoMode ? 'Demo Presentation Simulation' : targetName}</strong></span>
+            <span>•</span>
+            <span>Permissionless: No wallet required</span>
+          </div>
+          {isDemoMode && (
+            <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: 600 }}>
+              🎓 Presentation Mode Active
+            </span>
+          )}
+        </div>
+
+        {/* Presentation Sample Test Buttons */}
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+            Sample Test Records (1-Click Fill & Verify):
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setCertId('DEMO-CERT-2024-001');
+                setSearchParams({ id: 'DEMO-CERT-2024-001' });
+                verifyCertificateId('DEMO-CERT-2024-001');
+              }}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '5px 10px', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+            >
+              ✓ Valid 1: DEMO-CERT-2024-001 (Aarav Sharma)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCertId('DEMO-CERT-2024-002');
+                setSearchParams({ id: 'DEMO-CERT-2024-002' });
+                verifyCertificateId('DEMO-CERT-2024-002');
+              }}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '5px 10px', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+            >
+              ✓ Valid 2: DEMO-CERT-2024-002 (Diya Nair)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCertId('DEMO-CERT-2023-REVOKED');
+                setSearchParams({ id: 'DEMO-CERT-2023-REVOKED' });
+                verifyCertificateId('DEMO-CERT-2023-REVOKED');
+              }}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '5px 10px', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+            >
+              ⚠ Revoked: DEMO-CERT-2023-REVOKED (Rohan Verma)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCertId('DEMO-CERT-2024-TAMPER-TEST');
+                setSearchParams({ id: 'DEMO-CERT-2024-TAMPER-TEST' });
+                verifyCertificateId('DEMO-CERT-2024-TAMPER-TEST');
+              }}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '5px 10px', color: '#fbbf24', borderColor: 'rgba(245, 158, 11, 0.3)' }}
+            >
+              🔍 Tamper Test: DEMO-CERT-2024-TAMPER-TEST
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCertId('DEMO-UNKNOWN-404');
+                setSearchParams({ id: 'DEMO-UNKNOWN-404' });
+                verifyCertificateId('DEMO-UNKNOWN-404');
+              }}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '5px 10px', color: '#94a3b8' }}
+            >
+              ✕ Unknown ID: DEMO-UNKNOWN-404
+            </button>
+          </div>
         </div>
       </div>
 
@@ -243,13 +362,27 @@ export default function VerifyCertificate() {
           <div style={{ flex: 1 }}>
             <strong>Verification Query Error:</strong> {errorMsg}
           </div>
-          <button
-            onClick={() => verifyCertificateId(certId)}
-            className="btn-secondary"
-            style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}
-          >
-            Retry
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {!isDemoMode && (
+              <button
+                onClick={() => {
+                  toggleDemoMode(true);
+                  verifyCertificateId(certId);
+                }}
+                className="btn-primary"
+                style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}
+              >
+                Use Demo Mode
+              </button>
+            )}
+            <button
+              onClick={() => verifyCertificateId(certId)}
+              className="btn-secondary"
+              style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
 
@@ -284,8 +417,8 @@ export default function VerifyCertificate() {
             Certificate Not Found
           </h2>
           <p style={{ fontSize: '13px', color: '#94a3b8', maxWidth: 460, margin: '0 auto 20px', lineHeight: 1.6 }}>
-            No certificate with the identifier <strong>"{certId}"</strong> has been registered on the{' '}
-            {targetName} smart contract.
+            No certificate with the identifier <strong>"{certId}"</strong> has been registered on{' '}
+            {isDemoMode ? 'the Demo credential registry' : `${targetName} smart contract`}.
           </p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
             <Link to="/records" className="btn-secondary" style={{ fontSize: '12px' }}>
@@ -328,13 +461,28 @@ export default function VerifyCertificate() {
                   {cert.isRevoked ? <ShieldAlert size={26} /> : <ShieldCheck size={26} />}
                 </div>
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span
                       className={`badge ${cert.isRevoked ? 'badge-danger' : 'badge-success'}`}
                       style={{ fontSize: '12px', padding: '4px 10px' }}
                     >
                       {cert.isRevoked ? 'Revoked by Institution' : 'Authentic & Valid'}
                     </span>
+                    {(isDemoResult || isDemoMode) && (
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          background: 'rgba(59, 130, 246, 0.18)',
+                          color: '#60a5fa',
+                          border: '1px solid rgba(59, 130, 246, 0.35)',
+                        }}
+                      >
+                        DEMO PRESENTATION RECORD
+                      </span>
+                    )}
                     <span style={{ fontSize: '13px', color: '#64748b' }}>
                       ID: <strong>{cert.certificateId}</strong>
                     </span>
@@ -364,6 +512,29 @@ export default function VerifyCertificate() {
                 </Link>
               </div>
             </div>
+
+            {/* Demo Notice Banner */}
+            {(isDemoResult || isDemoMode) && (
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  background: 'rgba(59, 130, 246, 0.08)',
+                  border: '1px solid rgba(59, 130, 246, 0.25)',
+                  color: '#93c5fd',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <Info size={16} style={{ flexShrink: 0 }} />
+                <span>
+                  <strong>Presentation Demo Record:</strong> Fictional student identity for academic project presentation. Never represents an official academic degree qualification.
+                </span>
+              </div>
+            )}
 
             {/* Revocation Warning Box if revoked */}
             {cert.isRevoked && (
@@ -491,11 +662,44 @@ export default function VerifyCertificate() {
             </div>
           </div>
 
-          {/* Cryptographic Document Integrity Check (Optional file comparison) */}
+          {/* Cryptographic Document Integrity Check */}
           <div className="glass-card" style={{ padding: 24 }}>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Verify Physical / Digital Document Integrity
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Verify Physical / Digital Document Integrity
+              </div>
+              {/* Quick simulation buttons for presentation */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const mockFile = new File(['mock content'], `${cert.studentName.replace(/\s+/g, '_')}_Official_Degree.pdf`, { type: 'application/pdf' });
+                    setFile(mockFile);
+                    setFileHash(cert.documentHash);
+                    setHashResult('match');
+                  }}
+                  className="btn-secondary"
+                  style={{ fontSize: '11px', padding: '4px 10px', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+                >
+                  ✓ Simulate Matching Original File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const mockFile = new File(['tampered content'], `${cert.studentName.replace(/\s+/g, '_')}_Tampered_Copy.pdf`, { type: 'application/pdf' });
+                    setFile(mockFile);
+                    const alteredHash = '0xdeadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678';
+                    setFileHash(alteredHash);
+                    setHashResult('mismatch');
+                  }}
+                  className="btn-secondary"
+                  style={{ fontSize: '11px', padding: '4px 10px', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                >
+                  ⚠ Simulate Altered / Tampered File
+                </button>
+              </div>
             </div>
+
             <p style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.5, marginBottom: 16 }}>
               Have a copy of the PDF or scan? Drop it here to calculate its SHA-256 fingerprint client-side and verify whether any pixel or character has been tampered with.
             </p>
@@ -536,7 +740,7 @@ export default function VerifyCertificate() {
               ) : file ? (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <FileCheck size={20} color="#34d399" />
+                    <FileCheck size={20} color={hashResult === 'match' ? '#34d399' : '#f87171'} />
                     <span style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9' }}>{file.name}</span>
                   </div>
                   <span style={{ fontSize: '11px', color: '#64748b' }}>Click to choose different file</span>
@@ -545,7 +749,7 @@ export default function VerifyCertificate() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                   <Upload size={18} color="#7b93fa" />
                   <span style={{ fontSize: '13px', color: '#94a3b8' }}>
-                    Drop document here to verify hash match
+                    Drop document here or click to verify hash match
                   </span>
                 </div>
               )}
@@ -569,7 +773,7 @@ export default function VerifyCertificate() {
               >
                 <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
                 <div>
-                  <strong>Cryptographic Match Confirmed:</strong> The uploaded document SHA-256 fingerprint matches the exact hash stored on-chain at registration. Document is authentic and unaltered.
+                  <strong>Cryptographic Match Confirmed:</strong> The uploaded document SHA-256 fingerprint matches the exact hash registered on the ledger. The document is authentic, untampered, and verified.
                 </div>
               </div>
             )}
@@ -591,7 +795,7 @@ export default function VerifyCertificate() {
               >
                 <AlertTriangle size={18} style={{ flexShrink: 0 }} />
                 <div>
-                  <strong>Document Mismatch Detected:</strong> The uploaded file hash (<code>{formatHash(fileHash)}</code>) does NOT match the on-chain fingerprint (<code>{formatHash(cert.documentHash)}</code>). This file may have been modified or is a different document.
+                  <strong>Document Mismatch Detected:</strong> The uploaded file hash (<code>{formatHash(fileHash)}</code>) does NOT match the registered fingerprint (<code>{formatHash(cert.documentHash)}</code>). This file has either been modified or is a different document.
                 </div>
               </div>
             )}
