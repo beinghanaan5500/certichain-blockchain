@@ -443,13 +443,10 @@
   .sidebar {
     display: none;
   }
-  .sidebar.mobile-open {
-    display: flex;
-    position: fixed;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 100;
-    box-shadow: 8px 0 32px rgba(0,0,0,0.5);
+  .mobile-header {
+    display: flex !important;
+  }
+  main {
+    padding-top: 60px !important;
   }
 }

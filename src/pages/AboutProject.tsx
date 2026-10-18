@@ -143,11 +143,11 @@ export default function AboutProject() {
           <Layers size={16} color="#7b93fa" />
           <span style={{ fontSize: 14, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>System Architecture</span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
           {[
-            { icon: Globe, title: 'Presentation Layer', desc: 'React 18 + TypeScript\nVite build tool\nTailwind CSS v4\nLucide Icons', color: '#4f6ef7' },
+            { icon: Globe, title: 'Presentation Layer', desc: 'React 19 + TypeScript\nVite build tool\nTailwind CSS v4\nLucide Icons', color: '#4f6ef7' },
             { icon: Code2, title: 'Integration Layer',  desc: 'Ethers.js v6\nMetaMask browser extension\nJSON-RPC provider\nABI interface', color: '#2dd4bf' },
-            { icon: Database, title: 'Blockchain Layer', desc: 'Solidity 0.8.24 contract\nHardhat local network\nEVM execution\nEvent logs', color: '#f59e0b' },
+            { icon: Database, title: 'Blockchain Layer', desc: 'Solidity 0.8.24 contract\nEthereum Sepolia / Hardhat\nEVM execution\nEvent logs', color: '#f59e0b' },
           ].map(({ icon: Icon, title, desc, color }) => (
             <div key={title} style={{
               padding: 20, borderRadius: 14, textAlign: 'center',
@@ -156,7 +156,7 @@ export default function AboutProject() {
             }}>
               <Icon size={28} color={color} style={{ marginBottom: 10 }} />
               <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>{title}</div>
-              <div style={{ fontSize: 11, color: '#475569', whiteSpace: 'pre-line', lineHeight: 1.7 }}>{desc}</div>
+              <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'pre-line', lineHeight: 1.7 }}>{desc}</div>
             </div>
           ))}
         </div>

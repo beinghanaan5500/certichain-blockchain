@@ -13,9 +13,18 @@
   <img src="https://img.shields.io/badge/Hardhat-2.29-yellow?logo=ethereum" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react" />
   <img src="https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript" />
-  <img src="https://img.shields.io/badge/Ethers.js-6-purple" />
-  <img src="https://img.shields.io/badge/Tests-27%2F27%20passing-brightgreen" />
+  <img src="https://img.shields.io/badge/Vitest-5.0-729B1B?logo=vitest" />
+  <img src="https://img.shields.io/badge/Tests-45%2F45%20passing-brightgreen" />
 </p>
+
+---
+
+## Engineering Documentation
+
+- [Bug Fix & Engineering Audit Report](file:///c:/Users/Abdul%20Hanaan/OneDrive/Desktop/blockchain%20pro/BUG_FIX_REPORT.md) — Root-cause fixes for MetaMask detection, form focus bugs, and network switching.
+- [QA Testing Report](file:///c:/Users/Abdul%20Hanaan/OneDrive/Desktop/blockchain%20pro/QA_TEST_REPORT.md) — 45 automated test breakdown and manual test passes.
+- [UI/UX Changelog & Design System](file:///c:/Users/Abdul%20Hanaan/OneDrive/Desktop/blockchain%20pro/UI_UX_CHANGELOG.md) — Visual design tokens, component architecture, and responsive layouts.
+- [Deployment & Sepolia Status](file:///c:/Users/Abdul%20Hanaan/OneDrive/Desktop/blockchain%20pro/DEPLOYMENT_STATUS.md) — Step-by-step guide for local demo vs public Sepolia testnet on Vercel.
 
 ---
 
@@ -242,47 +251,19 @@ After running `npm run seed:demo`, the following certificate IDs are available:
 
 ## Running Tests
 
+Run the full automated test suite (45 tests):
+```bash
+npm test
+```
+
+### 1. Smart Contract Tests (27 tests)
 ```bash
 npm run test:contract
 ```
 
-```
-CertiChain — Smart Contract Tests
-  Deployment
-    ✓ Should set the owner correctly
-    ✓ Should authorize owner as issuer by default
-    ✓ Should start with zero certificates
-  Issuer Management
-    ✓ Owner can authorize a new issuer
-    ✓ Stranger cannot authorize an issuer
-    ✓ Owner can revoke an issuer
-    ✓ Cannot revoke the owner
-    ✓ Authorizing already-authorized issuer reverts
-  Certificate Registration
-    ✓ Authorized issuer can register a certificate
-    ✓ Unauthorized address cannot register a certificate
-    ✓ Duplicate certificate ID is rejected
-    ✓ Empty certificate ID is rejected
-    ✓ Zero document hash is rejected
-  Certificate Retrieval
-    ✓ getCertificate returns correct data
-    ✓ getCertificate reverts for non-existent ID
-    ✓ certificateExists_check returns true for registered cert
-    ✓ certificateExists_check returns false for unregistered cert
-    ✓ getCertificateIds returns paginated results
-  Certificate Verification
-    ✓ verifyCertificate returns exists=true for valid cert
-    ✓ Correct document hash matches
-    ✓ Incorrect document hash does not match
-    ✓ verifyCertificate returns exists=false for unknown cert
-  Certificate Revocation
-    ✓ Authorized issuer can revoke a certificate
-    ✓ Unauthorized address cannot revoke a certificate
-    ✓ Revoking an already-revoked certificate fails
-    ✓ Revoking without reason fails
-    ✓ Revoked certificate shows isRevoked=true in verifyCertificate
-
-27 passing (2s)
+### 2. Frontend Unit & Validation Tests (18 tests)
+```bash
+npm run test:unit
 ```
 
 ---
@@ -291,15 +272,19 @@ CertiChain — Smart Contract Tests
 
 | Script | Command | Description |
 |---|---|---|
+| Full Test Suite | `npm test` | Runs contract tests + Vitest unit tests (45 tests) |
+| Frontend Tests | `npm run test:unit` | Runs Vitest frontend validation & utility tests |
+| Contract Tests | `npm run test:contract` | Run 27 Hardhat/Mocha contract unit tests |
 | Dev server | `npm run dev` | Start Vite frontend dev server |
-| Build | `npm run build` | TypeScript check + production build |
-| Preview | `npm run preview` | Preview production build |
-| Compile | `npm run compile` | Compile Solidity contract |
-| Test | `npm run test:contract` | Run 27 Hardhat/Mocha tests |
-| Chain | `npm run chain` | Start local Hardhat node |
-| Deploy | `npm run deploy` | Deploy to localhost:8545 |
-| Seed | `npm run seed:demo` | Seed 7 demo certificates |
-| All-in-one | `npm run start` | Run chain + deploy + frontend concurrently |
+| Build | `npm run build` | TypeScript check + production Vite build |
+| Preview | `npm run preview` | Preview production build locally |
+| Compile | `npm run compile` | Compile Solidity contract with Hardhat |
+| Local Chain | `npm run chain` | Start local Hardhat EVM node (port 8545) |
+| Local Deploy | `npm run deploy` | Deploy to localhost:8545 and update config |
+| Sepolia Deploy | `npm run deploy:sepolia` | Autonomous deployment to Ethereum Sepolia |
+| Verify Sepolia | `npm run verify:sepolia` | Verify Solidity source on Sepolia Etherscan |
+| Seed Data | `npm run seed:demo` | Seed 7 demo certificates on active network |
+| All-in-one Start | `npm run start` | Concurrently runs local node, deploys & starts UI |
 
 ---
 

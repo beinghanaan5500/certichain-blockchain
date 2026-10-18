@@ -1,347 +1,437 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Award, ShieldCheck, Wallet, Activity, TrendingUp, FilePlus,
-  Search, ExternalLink, RefreshCw, AlertTriangle, CheckCircle2,
-  Clock, Hash, Users, Zap
+  Award, ShieldCheck, Wallet, Activity, FilePlus, Search,
+  RefreshCw, AlertTriangle, CheckCircle2, Clock, Hash,
+  ArrowRight, ShieldAlert, ExternalLink, Database, Layers
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getContract, formatAddress, formatTimestamp, getTargetNetworkName, getTargetChainId } from '../utils/contract';
+import {
+  getContract,
+  formatAddress,
+  formatTimestamp,
+  formatDate,
+  getTargetNetworkName,
+  getTargetChainId,
+  getExplorerUrl,
+  parseContractError
+} from '../utils/contract';
 import { Certificate } from '../types';
 
 export default function Dashboard() {
-  const { wallet, contract, connectWallet, refreshContract } = useApp();
+  const { wallet, contract, connectWallet, switchNetwork, refreshContract } = useApp();
   const [recentCerts, setRecentCerts] = useState<Certificate[]>([]);
+  const [activeCount, setActiveCount] = useState<number>(0);
+  const [revokedCount, setRevokedCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const loadRecentCertificates = useCallback(async () => {
-    if (!contract.isDeployed) return;
+  const targetName = getTargetNetworkName();
+  const targetChainId = getTargetChainId();
+
+  const loadDashboardData = useCallback(async () => {
     setLoading(true);
+    setErrorMsg('');
+
     try {
       const c = await getContract();
-      if (!c) return;
-      const total = Number(await c.getTotalCertificates());
-      if (total === 0) { setRecentCerts([]); return; }
-      const offset = Math.max(0, total - 5);
-      const ids: string[] = await c.getCertificateIds(BigInt(offset), BigInt(5));
-      const certs: Certificate[] = [];
-      for (const id of ids.slice().reverse()) {
+      if (!c) {
+        setErrorMsg(`Unable to query blockchain contract on ${targetName}.`);
+        setRecentCerts([]);
+        setActiveCount(0);
+        setRevokedCount(0);
+        return;
+      }
+
+      const totalBn = await c.getTotalCertificates();
+      const total = Number(totalBn);
+
+      if (total === 0) {
+        setRecentCerts([]);
+        setActiveCount(0);
+        setRevokedCount(0);
+        return;
+      }
+
+      // Fetch all IDs to compute accurate counts
+      const allIds: string[] = await c.getCertificateIds(0n, BigInt(total));
+      const loadedCerts: Certificate[] = [];
+      let active = 0;
+      let revoked = 0;
+
+      for (const id of allIds) {
         try {
-          const cert = await c.getCertificate(id);
-          certs.push({
-            certificateId:   cert.certificateId,
-            studentName:     cert.studentName,
-            courseName:      cert.courseName,
-            institutionName: cert.institutionName,
-            grade:           cert.grade,
-            issueDate:       cert.issueDate,
-            registeredAt:    cert.registeredAt,
-            documentHash:    cert.documentHash,
-            issuedBy:        cert.issuedBy,
-            isRevoked:       cert.isRevoked,
-            revokeReason:    cert.revokeReason,
-          });
+          const raw = await c.getCertificate(id);
+          const certItem: Certificate = {
+            certificateId:   raw.certificateId,
+            studentName:     raw.studentName,
+            courseName:      raw.courseName,
+            institutionName: raw.institutionName,
+            grade:           raw.grade,
+            issueDate:       raw.issueDate,
+            registeredAt:    raw.registeredAt,
+            documentHash:    raw.documentHash,
+            issuedBy:        raw.issuedBy,
+            isRevoked:       raw.isRevoked,
+            revokeReason:    raw.revokeReason,
+          };
+          loadedCerts.push(certItem);
+          if (raw.isRevoked) revoked++;
+          else active++;
         } catch {}
       }
-      setRecentCerts(certs);
-    } catch (err) {
-      console.error('loadRecentCertificates error:', err);
+
+      setActiveCount(active);
+      setRevokedCount(revoked);
+      // Newest 5 for recent activity table
+      setRecentCerts(loadedCerts.slice().reverse().slice(0, 5));
+    } catch (err: any) {
+      console.error('loadDashboardData error:', err);
+      setErrorMsg(parseContractError(err));
     } finally {
       setLoading(false);
     }
-  }, [contract.isDeployed]);
+  }, [targetName]);
 
-  useEffect(() => { loadRecentCertificates(); }, [loadRecentCertificates]);
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
 
   const handleRefresh = async () => {
     await refreshContract();
-    await loadRecentCertificates();
+    await loadDashboardData();
   };
 
-  const stats = [
+  const statCards = [
     {
-      label: 'Total Certificates',
+      label: 'Total Registered',
       value: contract.totalCertificates,
       icon: Award,
-      gradient: 'linear-gradient(135deg, #4f6ef7 0%, #6366f1 100%)',
-      glow: 'rgba(79,110,247,0.3)',
+      color: '#3b82f6',
+      sub: 'On-chain certificates',
     },
     {
-      label: 'Active Certs',
-      value: recentCerts.filter(c => !c.isRevoked).length,
+      label: 'Active & Valid',
+      value: activeCount,
       icon: ShieldCheck,
-      gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-      glow: 'rgba(16,185,129,0.3)',
+      color: '#10b981',
+      sub: 'Tamper-proof credentials',
     },
     {
-      label: 'Revoked Certs',
-      value: recentCerts.filter(c => c.isRevoked).length,
+      label: 'Revoked Certificates',
+      value: revokedCount,
       icon: AlertTriangle,
-      gradient: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-      glow: 'rgba(239,68,68,0.3)',
+      color: '#f87171',
+      sub: 'Flagged by institutions',
     },
     {
-      label: 'Block Number',
-      value: contract.lastBlockNumber ?? '—',
+      label: 'Block Height',
+      value: contract.lastBlockNumber ? `#${contract.lastBlockNumber}` : '—',
       icon: Activity,
-      gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-      glow: 'rgba(245,158,11,0.3)',
+      color: '#f59e0b',
+      sub: targetName.replace(/\(.*\)/, ''),
     },
   ];
 
   return (
-    <div style={{ padding: '32px', maxWidth: 1200 }}>
+    <div style={{ padding: '32px 24px', maxWidth: 1140, margin: '0 auto' }}>
       {/* Header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div
+        className="page-header"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+          gap: 16,
+          marginBottom: 24,
+        }}
+      >
         <div>
-          <h1 className="page-title gradient-text">Dashboard</h1>
-          <p className="page-subtitle">Real-time blockchain certificate overview</p>
+          <h1 className="page-title gradient-text">CertiChain Overview</h1>
+          <p className="page-subtitle">
+            Decentralized student credential registry on Ethereum. Live state verified from smart contract.
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn-secondary" onClick={handleRefresh} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          <Link to="/register" className="btn-primary" style={{ fontSize: '13px' }}>
+            <FilePlus size={14} />
+            Register Certificate
+          </Link>
+          <button
+            className="btn-secondary"
+            onClick={handleRefresh}
+            disabled={loading}
+            style={{ fontSize: '13px' }}
+          >
+            <RefreshCw size={14} className={loading ? 'spinner' : ''} />
             Refresh
           </button>
-          <Link to="/register" className="btn-primary" style={{ textDecoration: 'none' }}>
-            <FilePlus size={14} />
-            New Certificate
-          </Link>
         </div>
       </div>
 
-      {/* Network Warning */}
-      {wallet.isConnected && !wallet.isCorrectNetwork && (
-        <div className="alert alert-warning fade-in" style={{ marginBottom: 24 }}>
-          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-          <div>
-            <strong>Wrong Network</strong> — Please switch MetaMask to <strong>{getTargetNetworkName()}</strong> (Chain ID: {getTargetChainId()}).
+      {/* Network Alert / Diagnostic Banner */}
+      {!contract.isDeployed ? (
+        <div className="alert alert-warning" style={{ marginBottom: 24 }}>
+          <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, fontSize: '13px' }}>
+            <strong>Smart Contract Not Detected:</strong> No deployed CertiChain contract could be reached at the configured address.
+            If running locally, run <code>npm run deploy</code>. For public Sepolia testnet demonstration, execute <code>npm run deploy:sepolia</code>.
           </div>
         </div>
-      )}
-
-      {/* Not Deployed Warning */}
-      {!contract.isDeployed && (
-        <div className="alert alert-warning fade-in" style={{ marginBottom: 24 }}>
-          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-          <div>
-            <strong>Contract Not Deployed</strong> — Configure the contract address in environment variables or deploy using <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 4 }}>npm run deploy</code>.
+      ) : wallet.isConnected && !wallet.isCorrectNetwork ? (
+        <div className="alert alert-warning" style={{ marginBottom: 24 }}>
+          <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, fontSize: '13px' }}>
+            <strong>Wrong Network Connected:</strong> Your wallet is connected to Chain ID <code>{wallet.chainId ?? 'unknown'}</code>.
+            This contract operates on <strong>{targetName}</strong> (Chain ID: <code>{targetChainId}</code>).
           </div>
+          <button
+            onClick={() => switchNetwork(targetChainId)}
+            className="btn-primary"
+            style={{ fontSize: '12px', padding: '6px 14px', flexShrink: 0 }}
+          >
+            Switch Network
+          </button>
         </div>
-      )}
+      ) : null}
 
-      {/* Stats Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
-        {stats.map(({ label, value, icon: Icon, gradient, glow }) => (
-          <div key={label} className="glass-card" style={{ padding: '20px 24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      {/* KPI Cards Grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+          gap: 18,
+          marginBottom: 28,
+        }}
+      >
+        {statCards.map((card, i) => {
+          const Icon = card.icon;
+          return (
+            <div
+              key={i}
+              className="glass-card"
+              style={{
+                padding: '20px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {card.label}
+                </span>
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: `${card.color}15`,
+                    color: card.color,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Icon size={16} />
+                </div>
+              </div>
               <div>
-                <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-                  {label}
+                <div style={{ fontSize: '26px', fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.02em' }}>
+                  {card.value}
                 </div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: '#f1f5f9', lineHeight: 1 }}>
-                  {loading ? '—' : value.toLocaleString()}
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: 2 }}>
+                  {card.sub}
                 </div>
-              </div>
-              <div style={{
-                width: 44, height: 44, borderRadius: 12, background: gradient,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: `0 4px 15px ${glow}`,
-                flexShrink: 0,
-              }}>
-                <Icon size={20} color="white" />
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Status Cards Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginBottom: 28 }}>
-        {/* Blockchain Status */}
-        <div className="glass-card" style={{ padding: '20px 24px' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Zap size={14} />
-            Blockchain Status
+      {/* Quick Action Navigation Cards */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: 18,
+          marginBottom: 28,
+        }}
+      >
+        <Link
+          to="/register"
+          className="glass-card"
+          style={{
+            padding: 22,
+            textDecoration: 'none',
+            color: 'inherit',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <FilePlus size={18} />
+              </div>
+              <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#f1f5f9' }}>Issue Certificate</h2>
+            </div>
+            <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+              Authorized institutions can register student credentials and anchor SHA-256 document digests on-chain.
+            </p>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: '#64748b' }}>Network</span>
-              <span className={`badge ${contract.isDeployed ? 'badge-success' : 'badge-warning'}`}>
-                <div className="pulse-dot" style={{ background: contract.isDeployed ? '#10b981' : '#f59e0b' }} />
-                {contract.isDeployed ? getTargetNetworkName() : 'Disconnected'}
-              </span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: '#64748b' }}>Contract</span>
-              <span style={{ fontSize: 12, color: '#4f6ef7', fontFamily: 'monospace' }}>
-                {contract.address ? formatAddress(contract.address) : 'Not deployed'}
-              </span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: '#64748b' }}>Chain ID</span>
-              <span style={{ fontSize: 12, color: '#94a3b8' }}>{getTargetChainId()}</span>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '12px', color: '#3b82f6', fontWeight: 600, marginTop: 14 }}>
+            Open Registration Form <ArrowRight size={13} />
           </div>
-        </div>
+        </Link>
 
-        {/* Wallet Status */}
-        <div className="glass-card" style={{ padding: '20px 24px' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Wallet size={14} />
-            Wallet Status
+        <Link
+          to="/verify"
+          className="glass-card"
+          style={{
+            padding: 22,
+            textDecoration: 'none',
+            color: 'inherit',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Search size={18} />
+              </div>
+              <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#f1f5f9' }}>Verify Credentials</h2>
+            </div>
+            <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+              Employers and verifiers can look up any Certificate ID or upload PDF files for cryptographic integrity proof.
+            </p>
           </div>
-          {wallet.isConnected ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: '#64748b' }}>Status</span>
-                <span className="badge badge-success">
-                  <div className="pulse-dot" style={{ background: '#10b981' }} />
-                  Connected
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: '#64748b' }}>Address</span>
-                <span style={{ fontSize: 12, color: '#7b93fa', fontFamily: 'monospace' }}>
-                  {formatAddress(wallet.address || '')}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: '#64748b' }}>Balance</span>
-                <span style={{ fontSize: 13, color: '#34d399', fontWeight: 600 }}>
-                  {wallet.balance} ETH
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', paddingTop: 8 }}>
-              <p style={{ fontSize: 13, color: '#475569', marginBottom: 14 }}>
-                Connect your wallet to register certificates.
-              </p>
-              <button className="btn-primary" onClick={connectWallet} style={{ fontSize: 13 }}>
-                <Wallet size={14} />
-                Connect MetaMask
-              </button>
-            </div>
-          )}
-        </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '12px', color: '#10b981', fontWeight: 600, marginTop: 14 }}>
+            Verify a Certificate <ArrowRight size={13} />
+          </div>
+        </Link>
 
-        {/* Quick Actions */}
-        <div className="glass-card" style={{ padding: '20px 24px' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <TrendingUp size={14} />
-            Quick Actions
+        <Link
+          to="/records"
+          className="glass-card"
+          style={{
+            padding: 22,
+            textDecoration: 'none',
+            color: 'inherit',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Database size={18} />
+              </div>
+              <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#f1f5f9' }}>Audit Ledger</h2>
+            </div>
+            <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+              Browse the public certificate registry with searching, filters, and complete CSV export capabilities.
+            </p>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <Link to="/register" style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-              background: 'rgba(79,110,247,0.08)', borderRadius: 10,
-              border: '1px solid rgba(79,110,247,0.15)', textDecoration: 'none',
-              transition: 'all 0.2s',
-            }}>
-              <FilePlus size={14} color="#7b93fa" />
-              <span style={{ fontSize: 13, color: '#7b93fa', fontWeight: 500 }}>Register Certificate</span>
-              <ExternalLink size={11} color="#4f6ef7" style={{ marginLeft: 'auto' }} />
-            </Link>
-            <Link to="/verify" style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-              background: 'rgba(16,185,129,0.08)', borderRadius: 10,
-              border: '1px solid rgba(16,185,129,0.15)', textDecoration: 'none',
-              transition: 'all 0.2s',
-            }}>
-              <Search size={14} color="#34d399" />
-              <span style={{ fontSize: 13, color: '#34d399', fontWeight: 500 }}>Verify Certificate</span>
-              <ExternalLink size={11} color="#10b981" style={{ marginLeft: 'auto' }} />
-            </Link>
-            <Link to="/records" style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-              background: 'rgba(245,158,11,0.08)', borderRadius: 10,
-              border: '1px solid rgba(245,158,11,0.15)', textDecoration: 'none',
-              transition: 'all 0.2s',
-            }}>
-              <Award size={14} color="#fbbf24" />
-              <span style={{ fontSize: 13, color: '#fbbf24', fontWeight: 500 }}>View All Records</span>
-              <ExternalLink size={11} color="#f59e0b" style={{ marginLeft: 'auto' }} />
-            </Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '12px', color: '#f59e0b', fontWeight: 600, marginTop: 14 }}>
+            Explore All Records <ArrowRight size={13} />
           </div>
-        </div>
+        </Link>
       </div>
 
-      {/* Recent Certificates */}
-      <div className="glass-card" style={{ overflow: 'hidden' }}>
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Clock size={15} />
-            Recent Certificates
+      {/* Recent On-Chain Activity Table */}
+      <div className="glass-card" style={{ padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <div>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc' }}>Recent On-Chain Activity</div>
+            <div style={{ fontSize: '11px', color: '#64748b' }}>Latest certificates anchored to the ledger</div>
           </div>
-          <Link to="/records" style={{ fontSize: 12, color: '#4f6ef7', textDecoration: 'none', fontWeight: 500 }}>
-            View All →
+          <Link to="/records" style={{ fontSize: '12px', color: '#3b82f6', fontWeight: 600, textDecoration: 'none' }}>
+            View Full Ledger ({contract.totalCertificates}) →
           </Link>
         </div>
 
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center' }}>
-            <div className="spinner" style={{ margin: '0 auto 12px' }} />
-            <div style={{ fontSize: 13, color: '#475569' }}>Loading from blockchain...</div>
+            <div className="spinner" style={{ margin: '0 auto 10px', width: 22, height: 22 }} />
+            <span style={{ fontSize: '12px', color: '#64748b' }}>Querying blockchain data...</span>
           </div>
         ) : recentCerts.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center' }}>
-            <Award size={40} color="#1e3a70" style={{ marginBottom: 12 }} />
-            <div style={{ fontSize: 15, color: '#475569', fontWeight: 500 }}>No certificates registered yet</div>
-            <p style={{ fontSize: 13, color: '#334155', marginTop: 6 }}>
-              Start by registering a certificate on the blockchain.
-            </p>
-            <Link to="/register" className="btn-primary" style={{ marginTop: 16, textDecoration: 'none', display: 'inline-flex' }}>
-              <FilePlus size={14} />
-              Register First Certificate
+          <div style={{ padding: 40, textAlign: 'center' }}>
+            <Award size={36} color="#334155" style={{ margin: '0 auto 10px' }} />
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#94a3b8', marginBottom: 4 }}>
+              No Certificates Registered Yet
+            </div>
+            <div style={{ fontSize: '12px', color: '#64748b', maxWidth: 400, margin: '0 auto 16px' }}>
+              The connected smart contract currently contains zero records. Be the first to issue an on-chain academic certificate.
+            </div>
+            <Link to="/register" className="btn-primary" style={{ fontSize: '12px' }}>
+              Issue First Certificate
             </Link>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Certificate ID</th>
-                  <th>Student Name</th>
-                  <th>Course</th>
-                  <th>Grade</th>
-                  <th>Registered</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentCerts.map((cert) => (
-                  <tr key={cert.certificateId}>
-                    <td>
-                      <span className="hash-text">{cert.certificateId}</span>
-                    </td>
-                    <td style={{ fontWeight: 500, color: '#e2e8f0' }}>{cert.studentName}</td>
-                    <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {cert.courseName}
-                    </td>
-                    <td>
-                      <span className="badge badge-info">{cert.grade}</span>
-                    </td>
-                    <td style={{ fontSize: 12, color: '#475569' }}>
-                      {formatTimestamp(cert.registeredAt)}
-                    </td>
-                    <td>
-                      <span className={`badge ${cert.isRevoked ? 'badge-danger' : 'badge-success'}`}>
-                        {cert.isRevoked ? '✕ Revoked' : '✓ Valid'}
-                      </span>
-                    </td>
-                    <td>
-                      <Link
-                        to={`/records/${cert.certificateId}`}
-                        style={{ color: '#4f6ef7', fontSize: 12, textDecoration: 'none', fontWeight: 500 }}
-                      >
-                        Details →
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {recentCerts.map(cert => (
+              <Link
+                key={cert.certificateId}
+                to={`/records/${cert.certificateId}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 16px',
+                  borderRadius: 10,
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.05)',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 8,
+                      background: cert.isRevoked ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+                      color: cert.isRevoked ? '#f87171' : '#10b981',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {cert.isRevoked ? <ShieldAlert size={16} /> : <ShieldCheck size={16} />}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9' }}>
+                      {cert.studentName}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>
+                      {cert.courseName} · {cert.institutionName}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#94a3b8' }}>
+                    {cert.certificateId}
+                  </span>
+                  <span className={`badge ${cert.isRevoked ? 'badge-danger' : 'badge-success'}`} style={{ fontSize: '9px' }}>
+                    {cert.isRevoked ? 'Revoked' : 'Valid'}
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    {formatDate(cert.issueDate)}
+                  </span>
+                </div>
+              </Link>
+            ))}
           </div>
         )}
       </div>

@@ -1,330 +1,600 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
 import {
   Search, Upload, CheckCircle2, XCircle, AlertTriangle, Hash,
-  Shield, ShieldOff, FileQuestion, Info, X, RotateCcw
+  ShieldCheck, ShieldAlert, FileQuestion, Info, X, RotateCcw,
+  User, BookOpen, Building2, Calendar, Star, Clock, ExternalLink,
+  Copy, Check, FileCheck, ArrowRight
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getContract, hashFile, formatAddress, formatTimestamp, formatDate } from '../utils/contract';
-import { Certificate, VerificationResult } from '../types';
+import {
+  getContract,
+  hashFile,
+  formatAddress,
+  formatTimestamp,
+  formatDate,
+  formatHash,
+  getTargetNetworkName,
+  getExplorerUrl,
+  parseContractError,
+} from '../utils/contract';
+import { Certificate } from '../types';
 
 type VerifyStatus = 'idle' | 'loading' | 'found' | 'not-found' | 'error';
 
-const RESULT_MESSAGES = {
-  found:         { color: '#34d399', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.25)', icon: CheckCircle2, label: 'Certificate Found & Valid' },
-  'not-found':   { color: '#f87171', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.25)',   icon: XCircle,       label: 'Certificate Not Found'    },
-  error:         { color: '#fbbf24', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.25)', icon: AlertTriangle, label: 'Verification Error'        },
-  idle:          { color: '#64748b', bg: 'transparent',           border: 'transparent',            icon: Search,        label: ''                          },
-  loading:       { color: '#7b93fa', bg: 'rgba(79,110,247,0.08)', border: 'rgba(79,110,247,0.25)', icon: Search,        label: 'Verifying...'              },
-};
-
 export default function VerifyCertificate() {
-  const { contract } = useApp();
-  const [certId, setCertId]   = useState('');
-  const [status, setStatus]   = useState<VerifyStatus>('idle');
-  const [cert, setCert]       = useState<Certificate | null>(null);
+  const { contract, refreshContract } = useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [certId, setCertId] = useState(searchParams.get('id') || '');
+  const [status, setStatus] = useState<VerifyStatus>('idle');
+  const [cert, setCert] = useState<Certificate | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
-  const [file, setFile]       = useState<File | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [fileHash, setFileHash] = useState('');
   const [hashingFile, setHashingFile] = useState(false);
-  const [hashResult, setHashResult]   = useState<'match' | 'mismatch' | null>(null);
+  const [hashResult, setHashResult] = useState<'match' | 'mismatch' | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const targetName = getTargetNetworkName();
 
-  const handleVerify = async () => {
-    if (!certId.trim()) return;
-    setStatus('loading');
-    setCert(null);
-    setErrorMsg('');
-    setHashResult(null);
+  const verifyCertificateId = useCallback(
+    async (idToVerify: string, currentFileHash?: string) => {
+      const trimmed = idToVerify.trim();
+      if (!trimmed) return;
 
-    try {
-      const c = await getContract();
-      if (!c) {
+      setStatus('loading');
+      setCert(null);
+      setErrorMsg('');
+      setHashResult(null);
+
+      try {
+        const c = await getContract();
+        if (!c) {
+          setStatus('error');
+          setErrorMsg(
+            `Unable to establish RPC connection to ${targetName}. If running locally, ensure your node is active with 'npm run start'.`
+          );
+          return;
+        }
+
+        const exists = await c.certificateExists_check(trimmed);
+        if (!exists) {
+          setStatus('not-found');
+          return;
+        }
+
+        const raw = await c.getCertificate(trimmed);
+        const certificate: Certificate = {
+          certificateId:   raw.certificateId,
+          studentName:     raw.studentName,
+          courseName:      raw.courseName,
+          institutionName: raw.institutionName,
+          grade:           raw.grade,
+          issueDate:       raw.issueDate,
+          registeredAt:    raw.registeredAt,
+          documentHash:    raw.documentHash,
+          issuedBy:        raw.issuedBy,
+          isRevoked:       raw.isRevoked,
+          revokeReason:    raw.revokeReason,
+        };
+
+        setCert(certificate);
+        setStatus('found');
+
+        const hashToCompare = currentFileHash || fileHash;
+        if (hashToCompare) {
+          setHashResult(hashToCompare.toLowerCase() === raw.documentHash.toLowerCase() ? 'match' : 'mismatch');
+        }
+      } catch (err: any) {
+        console.error('Verification query failed:', err);
         setStatus('error');
-        setErrorMsg('Cannot connect to the blockchain. Ensure the Hardhat node is running.');
-        return;
+        setErrorMsg(parseContractError(err));
       }
+    },
+    [fileHash, targetName]
+  );
 
-      const exists = await c.certificateExists_check(certId.trim());
-      if (!exists) {
-        setStatus('not-found');
-        return;
+  // Check URL param on mount
+  useEffect(() => {
+    const idParam = searchParams.get('id');
+    if (idParam) {
+      setCertId(idParam);
+      verifyCertificateId(idParam);
+    }
+  }, [searchParams, verifyCertificateId]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!certId.trim()) return;
+    setSearchParams({ id: certId.trim() });
+    verifyCertificateId(certId);
+  };
+
+  const handleFile = useCallback(
+    async (selectedFile: File) => {
+      setFile(selectedFile);
+      setHashingFile(true);
+      setHashResult(null);
+      try {
+        const hash = await hashFile(selectedFile);
+        setFileHash(hash);
+        if (cert) {
+          setHashResult(hash.toLowerCase() === cert.documentHash.toLowerCase() ? 'match' : 'mismatch');
+        }
+      } catch (err) {
+        console.error('File hashing error:', err);
+      } finally {
+        setHashingFile(false);
       }
+    },
+    [cert]
+  );
 
-      const raw = await c.getCertificate(certId.trim());
-      const certificate: Certificate = {
-        certificateId:   raw.certificateId,
-        studentName:     raw.studentName,
-        courseName:      raw.courseName,
-        institutionName: raw.institutionName,
-        grade:           raw.grade,
-        issueDate:       raw.issueDate,
-        registeredAt:    raw.registeredAt,
-        documentHash:    raw.documentHash,
-        issuedBy:        raw.issuedBy,
-        isRevoked:       raw.isRevoked,
-        revokeReason:    raw.revokeReason,
-      };
-      setCert(certificate);
-      setStatus('found');
+  const handleFileDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      const dropped = e.dataTransfer.files[0];
+      if (dropped) handleFile(dropped);
+    },
+    [handleFile]
+  );
 
-      // Check hash if file already uploaded
-      if (fileHash) {
-        setHashResult(fileHash === raw.documentHash ? 'match' : 'mismatch');
-      }
-    } catch (err: any) {
-      setStatus('error');
-      setErrorMsg(err?.message || 'An unexpected error occurred');
+  const handleCopyLink = () => {
+    if (cert) {
+      const url = `${window.location.origin}/verify?id=${encodeURIComponent(cert.certificateId)}`;
+      navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
     }
   };
 
-  const handleFile = useCallback(async (selectedFile: File) => {
-    setFile(selectedFile);
-    setHashingFile(true);
-    setHashResult(null);
-    try {
-      const hash = await hashFile(selectedFile);
-      setFileHash(hash);
-      // Compare immediately if certificate already loaded
-      if (cert) {
-        setHashResult(hash === cert.documentHash ? 'match' : 'mismatch');
-      }
-    } finally {
-      setHashingFile(false);
-    }
-  }, [cert]);
-
   const reset = () => {
-    setCertId(''); setStatus('idle'); setCert(null);
-    setErrorMsg(''); setFile(null); setFileHash('');
+    setCertId('');
+    setStatus('idle');
+    setCert(null);
+    setErrorMsg('');
+    setFile(null);
+    setFileHash('');
     setHashResult(null);
+    setSearchParams({});
   };
 
   return (
-    <div style={{ padding: '32px', maxWidth: 900 }}>
-      <div className="page-header">
+    <div style={{ padding: '32px 24px', maxWidth: 960, margin: '0 auto' }}>
+      {/* Page Header */}
+      <div className="page-header" style={{ marginBottom: 24 }}>
         <h1 className="page-title gradient-text">Verify Certificate</h1>
-        <p className="page-subtitle">Authenticate any certificate against the immutable blockchain record</p>
+        <p className="page-subtitle">
+          Query the Ethereum blockchain to verify student credential authenticity and validate document integrity.
+        </p>
       </div>
 
-      {!contract.isDeployed && (
-        <div className="alert alert-warning" style={{ marginBottom: 24 }}>
-          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-          <div><strong>Contract Not Deployed</strong> — Start the Hardhat node and deploy the contract first.</div>
-        </div>
-      )}
-
-      {/* Search Box */}
-      <div className="glass-card" style={{ padding: 28, marginBottom: 24 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 16 }}>
-          Step 1 — Enter Certificate ID
-        </div>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <input
-            className="form-input"
-            placeholder="e.g. CERT-2024-0001"
-            value={certId}
-            onChange={e => setCertId(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleVerify()}
-            disabled={status === 'loading'}
-            style={{ flex: 1, fontSize: 15 }}
-          />
-          <button
-            className="btn-primary"
-            onClick={handleVerify}
-            disabled={status === 'loading' || !certId.trim()}
-            style={{ padding: '12px 24px' }}
-          >
-            {status === 'loading'
-              ? <><div className="spinner" /> Verifying...</>
-              : <><Search size={16} /> Verify</>
-            }
-          </button>
-          {status !== 'idle' && (
-            <button className="btn-secondary" onClick={reset} title="Reset">
-              <RotateCcw size={14} />
+      {/* Search Input Box */}
+      <div className="glass-card" style={{ padding: '24px 28px', marginBottom: 28 }}>
+        <form onSubmit={handleSubmit}>
+          <label className="form-label" htmlFor="certId">
+            Enter Certificate ID
+          </label>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <Search
+                size={16}
+                color="#64748b"
+                style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }}
+              />
+              <input
+                id="certId"
+                type="text"
+                className="form-input"
+                placeholder="e.g. CERT-2024-0001 or CERT-2024-1234"
+                value={certId}
+                onChange={e => setCertId(e.target.value)}
+                style={{ paddingLeft: 40 }}
+                autoComplete="off"
+              />
+            </div>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={status === 'loading' || !certId.trim()}
+              style={{ flexShrink: 0, padding: '10px 22px' }}
+            >
+              {status === 'loading' ? (
+                <>
+                  <div className="spinner" style={{ width: 14, height: 14 }} />
+                  Verifying...
+                </>
+              ) : (
+                <>
+                  <ShieldCheck size={16} />
+                  Verify On-Chain
+                </>
+              )}
             </button>
-          )}
+            {status !== 'idle' && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={reset}
+                title="Reset verification"
+                style={{ padding: '10px 14px' }}
+              >
+                <RotateCcw size={15} />
+              </button>
+            )}
+          </div>
+        </form>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, fontSize: '12px', color: '#64748b' }}>
+          <span>Target Network: <strong>{targetName}</strong></span>
+          <span>•</span>
+          <span>Permissionless: No wallet required to verify</span>
         </div>
       </div>
 
-      {/* Not Found */}
-      {status === 'not-found' && (
-        <div className="glass-card fade-in" style={{ padding: 48, textAlign: 'center' }}>
-          <XCircle size={48} color="#ef4444" style={{ marginBottom: 16 }} />
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#f87171', marginBottom: 8 }}>Certificate Not Found</h2>
-          <p style={{ fontSize: 14, color: '#64748b' }}>
-            No certificate with ID <strong style={{ color: '#f87171' }}>"{certId}"</strong> exists on the blockchain.
-          </p>
-          <p style={{ fontSize: 13, color: '#475569', marginTop: 8 }}>
-            The certificate may not have been registered, or the ID may be incorrect.
-          </p>
-        </div>
-      )}
-
-      {/* Error */}
+      {/* STATE 1: Error Banner */}
       {status === 'error' && (
-        <div className="alert alert-error fade-in">
-          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-          <div><strong>Verification Failed:</strong> {errorMsg}</div>
+        <div className="alert alert-error" style={{ marginBottom: 28 }}>
+          <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ flex: 1 }}>
+            <strong>Verification Query Error:</strong> {errorMsg}
+          </div>
+          <button
+            onClick={() => verifyCertificateId(certId)}
+            className="btn-secondary"
+            style={{ fontSize: '11px', padding: '4px 10px', flexShrink: 0 }}
+          >
+            Retry
+          </button>
         </div>
       )}
 
-      {/* Found — Certificate Details */}
+      {/* STATE 2: Certificate Not Found */}
+      {status === 'not-found' && (
+        <div
+          className="glass-card"
+          style={{
+            padding: 40,
+            textAlign: 'center',
+            border: '1px solid rgba(239, 68, 68, 0.25)',
+            background: 'rgba(239, 68, 68, 0.04)',
+            marginBottom: 28,
+          }}
+        >
+          <div
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: '50%',
+              background: 'rgba(239, 68, 68, 0.15)',
+              color: '#f87171',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 16px',
+            }}
+          >
+            <XCircle size={28} />
+          </div>
+          <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#f87171', marginBottom: 6 }}>
+            Certificate Not Found
+          </h2>
+          <p style={{ fontSize: '13px', color: '#94a3b8', maxWidth: 460, margin: '0 auto 20px', lineHeight: 1.6 }}>
+            No certificate with the identifier <strong>"{certId}"</strong> has been registered on the{' '}
+            {targetName} smart contract.
+          </p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            <Link to="/records" className="btn-secondary" style={{ fontSize: '12px' }}>
+              Explore Registered Records
+            </Link>
+            <button onClick={reset} className="btn-primary" style={{ fontSize: '12px' }}>
+              Search Another ID
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STATE 3: Certificate Found & Verification Breakdown */}
       {status === 'found' && cert && (
-        <div className="fade-in">
-          {/* Status Banner */}
-          <div style={{
-            padding: '16px 20px', borderRadius: 12, marginBottom: 20,
-            background: cert.isRevoked ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)',
-            border: `1px solid ${cert.isRevoked ? 'rgba(239,68,68,0.25)' : 'rgba(16,185,129,0.25)'}`,
-            display: 'flex', alignItems: 'center', gap: 14,
-          }}>
-            {cert.isRevoked
-              ? <ShieldOff size={28} color="#ef4444" />
-              : <Shield size={28} color="#10b981" />
-            }
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: cert.isRevoked ? '#f87171' : '#34d399' }}>
-                {cert.isRevoked ? '⚠ Certificate REVOKED' : '✓ Certificate is VALID'}
-              </div>
-              <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>
-                {cert.isRevoked
-                  ? `Revoked reason: "${cert.revokeReason}"`
-                  : 'This certificate record exists on the Ethereum blockchain and has not been revoked.'}
-              </div>
-            </div>
-          </div>
-
-          {/* Certificate Data */}
-          <div className="glass-card" style={{ padding: 28, marginBottom: 20 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>
-              Certificate Details
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 32px' }}>
-              {[
-                { label: 'Certificate ID',  value: cert.certificateId,   mono: true },
-                { label: 'Student Name',    value: cert.studentName                 },
-                { label: 'Course / Degree', value: cert.courseName                  },
-                { label: 'Institution',     value: cert.institutionName             },
-                { label: 'Grade / CGPA',    value: cert.grade                       },
-                { label: 'Issue Date',      value: formatDate(cert.issueDate)        },
-                { label: 'Registered On',   value: formatTimestamp(cert.registeredAt) },
-                { label: 'Issued By',       value: formatAddress(cert.issuedBy), mono: true },
-              ].map(({ label, value, mono }) => (
-                <div key={label}>
-                  <div style={{ fontSize: 10, color: '#475569', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontSize: 13, color: mono ? '#4f6ef7' : '#e2e8f0', fontFamily: mono ? 'monospace' : undefined, fontWeight: 500 }}>{value}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Main Status Badge Card */}
+          <div
+            className="glass-card"
+            style={{
+              padding: 24,
+              border: `1px solid ${cert.isRevoked ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
+              background: cert.isRevoked ? 'rgba(239, 68, 68, 0.05)' : 'rgba(16, 185, 129, 0.05)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: '12px',
+                    background: cert.isRevoked ? 'rgba(239, 68, 68, 0.18)' : 'rgba(16, 185, 129, 0.18)',
+                    color: cert.isRevoked ? '#f87171' : '#10b981',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  {cert.isRevoked ? <ShieldAlert size={26} /> : <ShieldCheck size={26} />}
                 </div>
-              ))}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      className={`badge ${cert.isRevoked ? 'badge-danger' : 'badge-success'}`}
+                      style={{ fontSize: '12px', padding: '4px 10px' }}
+                    >
+                      {cert.isRevoked ? 'Revoked by Institution' : 'Authentic & Valid'}
+                    </span>
+                    <span style={{ fontSize: '13px', color: '#64748b' }}>
+                      ID: <strong>{cert.certificateId}</strong>
+                    </span>
+                  </div>
+                  <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#f8fafc', marginTop: 4 }}>
+                    {cert.studentName}
+                  </h2>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="btn-secondary"
+                  style={{ fontSize: '12px', padding: '7px 12px' }}
+                >
+                  {copiedLink ? <Check size={13} color="#34d399" /> : <Copy size={13} />}
+                  {copiedLink ? 'Link Copied' : 'Share Verification'}
+                </button>
+                <Link
+                  to={`/records/${cert.certificateId}`}
+                  className="btn-secondary"
+                  style={{ fontSize: '12px', padding: '7px 12px' }}
+                >
+                  Audit Details ↗
+                </Link>
+              </div>
             </div>
 
-            {/* Document Hash */}
-            <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ fontSize: 10, color: '#475569', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-                Registered Document Hash (SHA-256)
+            {/* Revocation Warning Box if revoked */}
+            {cert.isRevoked && (
+              <div
+                style={{
+                  marginTop: 18,
+                  padding: '14px 18px',
+                  borderRadius: '10px',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#fca5a5',
+                  fontSize: '13px',
+                }}
+              >
+                <div style={{ fontWeight: 700, color: '#f87171', marginBottom: 4 }}>
+                  ⚠️ This Certificate Was Officially Revoked
+                </div>
+                <div>
+                  <strong>Revocation Reason:</strong> {cert.revokeReason || 'No specific reason specified by issuer.'}
+                </div>
               </div>
-              <div className="hash-text" style={{ wordBreak: 'break-all', fontSize: 11 }}>
-                {cert.documentHash}
+            )}
+          </div>
+
+          {/* Detailed Certificate Metadata Breakdown */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
+            {/* Academic Credential Card */}
+            <div className="glass-card" style={{ padding: 22 }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>
+                Academic Information
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <BookOpen size={16} color="#7b93fa" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>Degree / Program</div>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#f1f5f9' }}>{cert.courseName}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <Building2 size={16} color="#7b93fa" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>Issuing Institution</div>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#f1f5f9' }}>{cert.institutionName}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <Star size={16} color="#f59e0b" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>Grade / CGPA</div>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#f1f5f9' }}>{cert.grade}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <Calendar size={16} color="#7b93fa" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>Date of Issue</div>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#f1f5f9' }}>{formatDate(cert.issueDate)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Blockchain On-Chain Provenance Card */}
+            <div className="glass-card" style={{ padding: 22 }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>
+                Blockchain Provenance
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <Clock size={16} color="#2dd4bf" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>On-Chain Registration Timestamp</div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9' }}>
+                      {formatTimestamp(cert.registeredAt)}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <User size={16} color="#2dd4bf" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>Issuer Wallet Address</div>
+                    <div style={{ fontSize: '13px', fontFamily: 'monospace', color: '#cbd5e1' }}>
+                      {formatAddress(cert.issuedBy)}
+                      {getExplorerUrl(cert.issuedBy, 'address') && (
+                        <a
+                          href={getExplorerUrl(cert.issuedBy, 'address')!}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ marginLeft: 6, color: '#60a5fa' }}
+                          title="View on Etherscan"
+                        >
+                          ↗
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginBottom: 4 }}>
+                    On-Chain Document Hash (SHA-256)
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: 'monospace',
+                      fontSize: '11px',
+                      color: '#94a3b8',
+                      background: 'rgba(0,0,0,0.25)',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {cert.documentHash}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Document Verification */}
-          <div className="glass-card" style={{ padding: 28 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-              Step 2 — Verify Document Integrity (Optional)
+          {/* Cryptographic Document Integrity Check (Optional file comparison) */}
+          <div className="glass-card" style={{ padding: 24 }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Verify Physical / Digital Document Integrity
             </div>
-            <p style={{ fontSize: 13, color: '#475569', marginBottom: 20 }}>
-              Upload the original certificate document. We will compute its SHA-256 hash and compare it with the hash stored on-chain.
+            <p style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.5, marginBottom: 16 }}>
+              Have a copy of the PDF or scan? Drop it here to calculate its SHA-256 fingerprint client-side and verify whether any pixel or character has been tampered with.
             </p>
 
             <div
               className={`upload-zone ${dragOver ? 'dragover' : ''}`}
               onClick={() => fileInputRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+              onDragOver={e => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
               onDragLeave={() => setDragOver(false)}
-              onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }}
+              onDrop={handleFileDrop}
+              style={{
+                border: '2px dashed rgba(255, 255, 255, 0.12)',
+                borderRadius: '12px',
+                padding: '20px',
+                textAlign: 'center',
+                cursor: 'pointer',
+                background: dragOver ? 'rgba(79, 110, 247, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+              }}
             >
-              <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
-              {file ? (
-                <div>
-                  <CheckCircle2 size={24} color="#10b981" style={{ marginBottom: 6 }} />
-                  <div style={{ fontSize: 13, fontWeight: 500, color: '#34d399' }}>{file.name}</div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                style={{ display: 'none' }}
+                accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                onChange={e => {
+                  if (e.target.files?.[0]) handleFile(e.target.files[0]);
+                }}
+              />
+
+              {hashingFile ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <div className="spinner" style={{ width: 18, height: 18 }} />
+                  <span style={{ fontSize: '13px', color: '#7b93fa' }}>Computing document hash...</span>
+                </div>
+              ) : file ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <FileCheck size={20} color="#34d399" />
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9' }}>{file.name}</span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Click to choose different file</span>
                 </div>
               ) : (
-                <div>
-                  <Upload size={24} color="#4f6ef7" style={{ marginBottom: 6 }} />
-                  <div style={{ fontSize: 13, color: '#7b93fa' }}>Click or drag document to verify integrity</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                  <Upload size={18} color="#7b93fa" />
+                  <span style={{ fontSize: '13px', color: '#94a3b8' }}>
+                    Drop document here to verify hash match
+                  </span>
                 </div>
               )}
             </div>
 
-            {hashingFile && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, color: '#7b93fa', fontSize: 13 }}>
-                <div className="spinner" />
-                Computing SHA-256 hash...
-              </div>
-            )}
-
-            {fileHash && !hashingFile && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 10, color: '#475569', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
-                  Computed Hash
+            {/* Cryptographic Comparison Result */}
+            {hashResult === 'match' && (
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: '12px 16px',
+                  borderRadius: '10px',
+                  background: 'rgba(16, 185, 129, 0.12)',
+                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  color: '#34d399',
+                  fontSize: '13px',
+                }}
+              >
+                <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
+                <div>
+                  <strong>Cryptographic Match Confirmed:</strong> The uploaded document SHA-256 fingerprint matches the exact hash stored on-chain at registration. Document is authentic and unaltered.
                 </div>
-                <div className="hash-text" style={{ wordBreak: 'break-all', fontSize: 11 }}>
-                  {fileHash}
+              </div>
+            )}
+
+            {hashResult === 'mismatch' && (
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: '12px 16px',
+                  borderRadius: '10px',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  color: '#f87171',
+                  fontSize: '13px',
+                }}
+              >
+                <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+                <div>
+                  <strong>Document Mismatch Detected:</strong> The uploaded file hash (<code>{formatHash(fileHash)}</code>) does NOT match the on-chain fingerprint (<code>{formatHash(cert.documentHash)}</code>). This file may have been modified or is a different document.
                 </div>
               </div>
             )}
-
-            {hashResult && (
-              <div style={{ marginTop: 16 }}>
-                {hashResult === 'match' ? (
-                  <div className="alert alert-success">
-                    <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
-                    <div>
-                      <strong>Document Hash MATCHED ✓</strong>
-                      <div style={{ fontSize: 12, marginTop: 2 }}>
-                        The uploaded document is the exact file that was hashed and registered on the blockchain. The certificate is authentic.
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="alert alert-error">
-                    <XCircle size={18} style={{ flexShrink: 0 }} />
-                    <div>
-                      <strong>Document Hash MISMATCH ✗</strong>
-                      <div style={{ fontSize: 12, marginTop: 2 }}>
-                        The uploaded document does not match the registered hash. This document may be modified or incorrect.
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Idle State Guide */}
-      {status === 'idle' && (
-        <div className="glass-card" style={{ padding: 40, textAlign: 'center' }}>
-          <Shield size={48} color="#1e3a70" style={{ marginBottom: 16 }} />
-          <h2 style={{ fontSize: 18, fontWeight: 600, color: '#475569', marginBottom: 8 }}>
-            Enter a Certificate ID to Begin Verification
-          </h2>
-          <p style={{ fontSize: 13, color: '#334155', maxWidth: 460, margin: '0 auto', lineHeight: 1.7 }}>
-            CertiChain retrieves the certificate record from the Ethereum blockchain and verifies its authenticity.
-            Optionally upload the original document to verify its hash integrity.
-          </p>
-          <div style={{ display: 'flex', gap: 20, justifyContent: 'center', marginTop: 24, flexWrap: 'wrap' }}>
-            {['Certificate not found → Not registered on blockchain', 'Hash matched → Document is authentic', 'Hash mismatch → Document may be tampered', 'Revoked → Certificate has been invalidated'].map(item => (
-              <div key={item} style={{ fontSize: 12, color: '#475569', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Info size={12} color="#4f6ef7" />
-                {item}
-              </div>
-            ))}
           </div>
         </div>
       )}

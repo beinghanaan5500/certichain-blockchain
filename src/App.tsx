@@ -9,10 +9,12 @@ import Records from './pages/Records';
 import CertificateDetail from './pages/CertificateDetail';
 import AboutProject from './pages/AboutProject';
 import NotFound from './pages/NotFound';
+import WalletModal from './components/ui/WalletModal';
 
 export default function App() {
   return (
     <AppProvider>
+      <WalletModal />
       <BrowserRouter>
         <div style={{
           display: 'flex',

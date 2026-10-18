@@ -1,37 +1,79 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
-import { WalletState, ContractState } from '../types';
+import { WalletState, ContractState, WalletError } from '../types';
 import {
-  getProvider, getReadOnlyProvider, loadDeploymentConfig, getWalletChainId, isCorrectNetwork, formatAddress
+  getProvider,
+  getInjectedProvider,
+  getReadOnlyProvider,
+  loadDeploymentConfig,
+  getWalletChainId,
+  isCorrectNetwork,
+  switchOrAddNetwork,
+  getTargetChainId,
+  parseContractError,
 } from '../utils/contract';
 import { ethers } from 'ethers';
 
 interface AppContextType {
-  wallet:    WalletState;
-  contract:  ContractState;
-  connectWallet:    () => Promise<void>;
-  disconnectWallet: () => void;
-  refreshContract:  () => Promise<void>;
+  wallet: WalletState;
+  contract: ContractState;
+  walletError: WalletError | null;
+  isWalletModalOpen: boolean;
   isLoading: boolean;
+  connectWallet: () => Promise<void>;
+  disconnectWallet: () => void;
+  switchNetwork: (targetChainId?: number) => Promise<boolean>;
+  refreshContract: () => Promise<void>;
+  clearWalletError: () => void;
+  openWalletModal: () => void;
+  closeWalletModal: () => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<WalletState>({
-    isConnected: false, address: null, chainId: null, balance: null, isCorrectNetwork: false,
+    isConnected: false,
+    address: null,
+    chainId: null,
+    balance: null,
+    isCorrectNetwork: false,
+    isAuthorizedIssuer: false,
+    isOwner: false,
   });
+
   const [contract, setContract] = useState<ContractState>({
-    isDeployed: false, address: null, totalCertificates: 0, lastBlockNumber: null,
+    isDeployed: false,
+    address: null,
+    totalCertificates: 0,
+    lastBlockNumber: null,
+    ownerAddress: null,
   });
+
+  const [walletError, setWalletError] = useState<WalletError | null>(null);
+  const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  const clearWalletError = useCallback(() => setWalletError(null), []);
+  const openWalletModal = useCallback(() => setIsWalletModalOpen(true), []);
+  const closeWalletModal = useCallback(() => {
+    setIsWalletModalOpen(false);
+    setWalletError(null);
+  }, []);
 
   // ── Refresh Contract State ────────────────────────────────────────────────
   const refreshContract = useCallback(async () => {
     const config = await loadDeploymentConfig();
     if (!config || !config.contractAddress) {
-      setContract({ isDeployed: false, address: null, totalCertificates: 0, lastBlockNumber: null });
+      setContract({
+        isDeployed: false,
+        address: null,
+        totalCertificates: 0,
+        lastBlockNumber: null,
+        ownerAddress: null,
+      });
       return;
     }
+
     try {
       const provider = getProvider() || (await getReadOnlyProvider());
       if (!provider) {
@@ -40,101 +82,247 @@ export function AppProvider({ children }: { children: ReactNode }) {
           address: config.contractAddress,
           totalCertificates: 0,
           lastBlockNumber: null,
+          ownerAddress: null,
         });
         return;
       }
+
       const c = new ethers.Contract(config.contractAddress, config.abi, provider);
-      const total = await c.getTotalCertificates();
-      let block: number | null = null;
-      try {
-        block = await provider.getBlockNumber();
-      } catch {}
+      const [total, block, owner] = await Promise.all([
+        c.getTotalCertificates().catch(() => 0n),
+        provider.getBlockNumber().catch(() => null),
+        c.owner().catch(() => null),
+      ]);
+
       setContract({
         isDeployed: true,
         address: config.contractAddress,
         totalCertificates: Number(total),
         lastBlockNumber: block,
+        ownerAddress: owner,
       });
-    } catch (err) {
+    } catch {
       setContract({
-        isDeployed: true, address: config.contractAddress,
-        totalCertificates: 0, lastBlockNumber: null,
+        isDeployed: true,
+        address: config.contractAddress,
+        totalCertificates: 0,
+        lastBlockNumber: null,
+        ownerAddress: null,
       });
     }
   }, []);
 
-  // ── Update Wallet State ───────────────────────────────────────────────────
+  // ── Update Wallet State & Permissions ─────────────────────────────────────
   const updateWallet = useCallback(async (address: string) => {
     const provider = getProvider();
     if (!provider) return;
-    const chainId = await getWalletChainId();
-    const balanceBn = await provider.getBalance(address);
-    const balance = parseFloat(ethers.formatEther(balanceBn)).toFixed(4);
-    setWallet({
-      isConnected: true,
-      address,
-      chainId,
-      balance,
-      isCorrectNetwork: isCorrectNetwork(chainId),
-    });
+
+    try {
+      const chainId = await getWalletChainId();
+      let balanceFormatted = '0.0000';
+      try {
+        const balanceBn = await provider.getBalance(address);
+        balanceFormatted = parseFloat(ethers.formatEther(balanceBn)).toFixed(4);
+      } catch {}
+
+      // Query authorization status if contract is accessible
+      let isAuthorized = false;
+      let isOwner = false;
+      const config = await loadDeploymentConfig();
+      if (config && config.contractAddress) {
+        try {
+          const c = new ethers.Contract(config.contractAddress, config.abi, provider);
+          const [owner, authorized] = await Promise.all([
+            c.owner().catch(() => null),
+            c.authorizedIssuers(address).catch(() => false),
+          ]);
+          isOwner = owner?.toLowerCase() === address.toLowerCase();
+          isAuthorized = isOwner || !!authorized;
+        } catch {}
+      }
+
+      setWallet({
+        isConnected: true,
+        address,
+        chainId,
+        balance: balanceFormatted,
+        isCorrectNetwork: isCorrectNetwork(chainId),
+        isAuthorizedIssuer: isAuthorized,
+        isOwner,
+      });
+      setWalletError(null);
+    } catch (err: any) {
+      console.warn('updateWallet error:', err);
+    }
   }, []);
 
   // ── Connect Wallet ────────────────────────────────────────────────────────
   const connectWallet = useCallback(async () => {
-    if (!(window as any).ethereum) {
-      alert('MetaMask not found. Please install MetaMask to use this app.');
+    const injected = getInjectedProvider();
+    if (!injected) {
+      setWalletError({
+        title: 'MetaMask Not Detected',
+        message:
+          'No Web3 Ethereum wallet was detected in your browser. Install the MetaMask extension or open this application in the MetaMask Mobile in-app browser.',
+        action: 'install_metamask',
+      });
+      setIsWalletModalOpen(true);
       return;
     }
+
     setIsLoading(true);
+    setWalletError(null);
+
     try {
-      const accounts: string[] = await (window as any).ethereum.request({
+      const accounts: string[] = await injected.request({
         method: 'eth_requestAccounts',
       });
-      if (accounts[0]) await updateWallet(accounts[0]);
+
+      if (accounts && accounts[0]) {
+        await updateWallet(accounts[0]);
+        await refreshContract();
+      }
     } catch (err: any) {
-      console.error('Wallet connection error:', err.message);
+      if (err.code === 4001) {
+        setWalletError({
+          title: 'Connection Cancelled',
+          message: 'The wallet connection request was cancelled in MetaMask. Please click connect and approve the prompt.',
+          action: 'retry',
+        });
+      } else if (err.code === -32002) {
+        setWalletError({
+          title: 'Request Already Open',
+          message: 'A connection request is already pending in MetaMask. Please open your MetaMask extension and approve.',
+          action: 'retry',
+        });
+      } else {
+        setWalletError({
+          title: 'Connection Failed',
+          message: parseContractError(err),
+          action: 'retry',
+        });
+      }
+      setIsWalletModalOpen(true);
     } finally {
       setIsLoading(false);
     }
-  }, [updateWallet]);
+  }, [updateWallet, refreshContract]);
 
+  // ── Switch Network ────────────────────────────────────────────────────────
+  const switchNetwork = useCallback(
+    async (targetChainId?: number): Promise<boolean> => {
+      const target = targetChainId || getTargetChainId();
+      setIsLoading(true);
+      const res = await switchOrAddNetwork(target);
+      setIsLoading(false);
+
+      if (res.success) {
+        if (wallet.address) {
+          await updateWallet(wallet.address);
+        }
+        await refreshContract();
+        return true;
+      } else {
+        setWalletError({
+          title: 'Network Switch Failed',
+          message: res.error || 'Failed to switch network in MetaMask.',
+          action: 'switch_network',
+        });
+        setIsWalletModalOpen(true);
+        return false;
+      }
+    },
+    [wallet.address, updateWallet, refreshContract]
+  );
+
+  // ── Disconnect Wallet ─────────────────────────────────────────────────────
   const disconnectWallet = useCallback(() => {
-    setWallet({ isConnected: false, address: null, chainId: null, balance: null, isCorrectNetwork: false });
+    setWallet({
+      isConnected: false,
+      address: null,
+      chainId: null,
+      balance: null,
+      isCorrectNetwork: false,
+      isAuthorizedIssuer: false,
+      isOwner: false,
+    });
+    setWalletError(null);
   }, []);
 
   // ── Auto-Connect if Already Authorized ───────────────────────────────────
   useEffect(() => {
+    let mounted = true;
     const init = async () => {
-      if ((window as any).ethereum) {
+      const injected = getInjectedProvider();
+      if (injected) {
         try {
-          const accounts: string[] = await (window as any).ethereum.request({ method: 'eth_accounts' });
-          if (accounts[0]) await updateWallet(accounts[0]);
+          const accounts: string[] = await injected.request({ method: 'eth_accounts' });
+          if (mounted && accounts && accounts[0]) {
+            await updateWallet(accounts[0]);
+          }
         } catch {}
       }
-      await refreshContract();
+      if (mounted) {
+        await refreshContract();
+      }
     };
     init();
+    return () => {
+      mounted = false;
+    };
   }, [updateWallet, refreshContract]);
 
   // ── Listen to MetaMask Events ─────────────────────────────────────────────
   useEffect(() => {
-    const eth = (window as any).ethereum;
-    if (!eth) return;
+    const injected = getInjectedProvider();
+    if (!injected || !injected.on) return;
+
     const onAccountsChanged = (accounts: string[]) => {
-      if (accounts[0]) updateWallet(accounts[0]);
-      else disconnectWallet();
+      if (accounts && accounts[0]) {
+        updateWallet(accounts[0]);
+      } else {
+        disconnectWallet();
+      }
     };
-    const onChainChanged = () => window.location.reload();
-    eth.on('accountsChanged', onAccountsChanged);
-    eth.on('chainChanged', onChainChanged);
+
+    const onChainChanged = (chainIdHex: string) => {
+      const newChainId = parseInt(chainIdHex, 16);
+      setWallet(prev => ({
+        ...prev,
+        chainId: newChainId,
+        isCorrectNetwork: isCorrectNetwork(newChainId),
+      }));
+      refreshContract();
+    };
+
+    injected.on('accountsChanged', onAccountsChanged);
+    injected.on('chainChanged', onChainChanged);
+
     return () => {
-      eth.removeListener('accountsChanged', onAccountsChanged);
-      eth.removeListener('chainChanged', onChainChanged);
+      if (injected.removeListener) {
+        injected.removeListener('accountsChanged', onAccountsChanged);
+        injected.removeListener('chainChanged', onChainChanged);
+      }
     };
-  }, [updateWallet, disconnectWallet]);
+  }, [updateWallet, disconnectWallet, refreshContract]);
 
   return (
-    <AppContext.Provider value={{ wallet, contract, connectWallet, disconnectWallet, refreshContract, isLoading }}>
+    <AppContext.Provider
+      value={{
+        wallet,
+        contract,
+        walletError,
+        isWalletModalOpen,
+        isLoading,
+        connectWallet,
+        disconnectWallet,
+        switchNetwork,
+        refreshContract,
+        clearWalletError,
+        openWalletModal,
+        closeWalletModal,
+      }}
+    >
       {children}
     </AppContext.Provider>
   );
