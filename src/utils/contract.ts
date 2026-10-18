@@ -2,6 +2,17 @@ import { ethers, BrowserProvider, Contract } from 'ethers';
 import { DeploymentConfig, NetworkConfig } from '../types';
 import defaultDeployment from '../config/deployment.json';
 
+// ── Environment Detection ────────────────────────────────────────────────────
+/**
+ * Detect if we are running in a production (HTTPS) browser context.
+ * On HTTPS origins, localhost/Hardhat configurations are unsafe and trigger
+ * MetaMask phishing warnings, so we must default to Sepolia.
+ */
+function isProductionContext(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.location.protocol === 'https:';
+}
+
 // ── Supported Network Configurations ─────────────────────────────────────────
 export const SUPPORTED_NETWORKS: Record<number, NetworkConfig> = {
   11155111: {
@@ -10,6 +21,8 @@ export const SUPPORTED_NETWORKS: Record<number, NetworkConfig> = {
     chainName: 'Ethereum Sepolia',
     rpcUrls: [
       'https://ethereum-sepolia-rpc.publicnode.com',
+      'https://sepolia.drpc.org',
+      'https://gateway.tenderly.co/public/sepolia',
       'https://rpc.sepolia.org',
       'https://1rpc.io/sepolia',
     ],
@@ -55,12 +68,29 @@ export function getEffectiveConfig(): DeploymentConfig {
   const envNetworkName = import.meta.env.VITE_NETWORK_NAME;
 
   const baseConfig = (deploymentConfig || defaultDeployment) as DeploymentConfig;
+  const isProd = isProductionContext();
+
+  // SECURITY: On production (HTTPS), force Sepolia to prevent MetaMask
+  // phishing warnings from attempting localhost chain connections.
+  // Localhost config (31337) is only valid when actually running on localhost.
+  const resolvedChainId = envChainId
+    || (isProd && baseConfig.chainId === 31337 ? 11155111 : baseConfig.chainId)
+    || (isProd ? 11155111 : 31337);
+
+  const resolvedNetworkName = envNetworkName
+    || (resolvedChainId === 11155111 ? 'sepolia' : baseConfig.networkName || 'localhost');
+
+  // On production, do NOT use a Hardhat default address — it does not exist on Sepolia
+  const isHardhatDefault = baseConfig.contractAddress === '0x5FbDB2315678afecb367f032d93F642f64180aa3';
+  const resolvedAddress = envContractAddress
+    || (isProd && isHardhatDefault ? '' : baseConfig.contractAddress)
+    || '';
 
   return {
     ...baseConfig,
-    contractAddress: envContractAddress || baseConfig.contractAddress || '',
-    chainId:         envChainId || baseConfig.chainId || 31337,
-    networkName:     envNetworkName || (envChainId === 11155111 ? 'sepolia' : baseConfig.networkName || 'localhost'),
+    contractAddress: resolvedAddress,
+    chainId: resolvedChainId,
+    networkName: resolvedNetworkName,
   };
 }
 
@@ -156,6 +186,8 @@ export async function getReadOnlyProvider(): Promise<ethers.JsonRpcProvider | nu
   } else if (targetChainId === 11155111) {
     candidateUrls.push(
       'https://ethereum-sepolia-rpc.publicnode.com',
+      'https://sepolia.drpc.org',
+      'https://gateway.tenderly.co/public/sepolia',
       'https://rpc.sepolia.org',
       'https://1rpc.io/sepolia'
     );

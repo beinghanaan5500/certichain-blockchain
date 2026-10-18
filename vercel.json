@@ -23,6 +23,14 @@
         {
           "key": "X-XSS-Protection",
           "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://ethereum-sepolia-rpc.publicnode.com https://sepolia.drpc.org https://gateway.tenderly.co https://rpc.sepolia.org https://1rpc.io https://api.sepolia.etherscan.io; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
         }
       ]
     }
