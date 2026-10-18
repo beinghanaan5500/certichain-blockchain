@@ -19,12 +19,15 @@ CertiChain supports two operational modes:
 
 ### Mode B: Ethereum Sepolia Public Testnet (Chain ID 11155111)
 - **Use Case:** Public Vercel demonstration accessible to any visitor worldwide without requiring a local blockchain process.
-- **RPC URLs:**
-  - `https://ethereum-sepolia-rpc.publicnode.com`
-  - `https://rpc.sepolia.org`
-  - `https://1rpc.io/sepolia`
+- **Verified RPC URLs (Live Audit):**
+  - `https://ethereum-sepolia-rpc.publicnode.com` (✅ ONLINE, ~528ms, Block ~11,943,458)
+  - `https://sepolia.drpc.org` (✅ ONLINE)
+  - `https://gateway.tenderly.co/public/sepolia` (✅ ONLINE)
+  - `https://1rpc.io/sepolia` (❌ **QUOTA EXHAUSTED**: HTTP 429 Too Many Requests)
+  - `https://rpc.sepolia.org` (❌ **TIMEOUT**: Public endpoint unresponsive)
 - **Block Explorer:** [https://sepolia.etherscan.io](https://sepolia.etherscan.io)
-- **Status:** Deployment automation prepared via `scripts/deploy-sepolia.cjs`.
+- **Security & Phishing Audit:** Resolved. Production HTTPS auto-defaults to Sepolia, preventing MetaMask localhost warnings and mixed content. Strict Content-Security-Policy header active on Vercel.
+- **Status:** Deployment automation prepared via `scripts/deploy-sepolia.cjs`. Frontend build and tests clean (27/27 contract, 18/18 frontend). Live bundle on Vercel: `index-BP13w7Aj.js`.
 
 ---
 
